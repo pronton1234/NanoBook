@@ -1,0 +1,18 @@
+[package]
+name = "server"
+version = "0.1.0"
+description = "Runs the native pipeline on demand and streams real measurements. Hand-rolled HTTP/SSE, no framework."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "latency-ladder-server"
+path = "src/main.rs"
+
+[dependencies]
+book = { path = "../book" }
+deep = { path = "../deep" }
+iextp = { path = "../iextp" }
+pipeline = { path = "../pipeline" }
+synth = { path = "../synth" }

@@ -1,0 +1,14 @@
+[package]
+name = "synth"
+version = "0.1.0"
+description = "Generates valid IEX-TP/DEEP captures, so the repo demonstrates itself without a 1.2GB download."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+deep = { path = "../deep" }
+
+[dev-dependencies]
+book = { path = "../book" }
+iextp = { path = "../iextp" }

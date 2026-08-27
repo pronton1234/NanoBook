@@ -54,6 +54,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "server"
+version = "0.1.0"
+dependencies = [
+ "book",
+ "deep",
+ "iextp",
+ "pipeline",
+ "synth",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -62,6 +73,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "synth"
+version = "0.1.0"
+dependencies = [
+ "book",
+ "deep",
+ "iextp",
 ]
 
 [[package]]

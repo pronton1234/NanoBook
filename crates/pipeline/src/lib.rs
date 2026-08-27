@@ -74,6 +74,8 @@ pub mod order;
 pub mod spsc;
 pub mod strategy;
 
+use std::collections::BTreeMap;
+
 pub use hist::Histogram;
 pub use order::{encode_enter_order, EncodeError, NewOrder, TokenGen, ENTER_ORDER_LEN};
 pub use strategy::{Params, Quote, Strategy};
@@ -118,6 +120,33 @@ impl Stage {
     }
 }
 
+/// Segment payloads held while a gap is open.
+///
+/// The sequencer buffers sequence *numbers*, which is all it needs to classify
+/// arrivals — but a receiver has to replay the messages once the gap closes, and
+/// for that it needs the bytes. Without this the pipeline skipped every buffered
+/// segment permanently, so a single dropped packet cost every segment behind it
+/// until the resync. A demo at 2% loss delivered 39,890 messages out of ~147,000
+/// that survived the drop; the missing ones were not lost by the network, they
+/// were discarded here.
+///
+/// Bounded, because an unbounded buffer behind a permanently lost segment is
+/// just a slower way to fail.
+const MAX_PENDING_SEGMENTS: usize = 256;
+
+/// Held segments tolerated before the stream is resynchronised.
+///
+/// A gap is not immediately a loss -- UDP reorders, and a segment arriving out
+/// of order is normal. But a segment that was genuinely dropped never arrives,
+/// and a receiver that waits for it forever stops delivering anything. On a live
+/// feed the sequence is: notice the gap, request retransmission, and if that
+/// goes unanswered, resynchronise and count what was skipped.
+///
+/// This project had no recovery at all until a demo run with 2% packet loss
+/// delivered 61 messages out of 117,522 packets. The sequencer was correct; the
+/// pipeline simply never told it to give up.
+pub const MAX_HELD_BEFORE_RESYNC: usize = 64;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Counters {
     pub packets: u64,
@@ -126,6 +155,14 @@ pub struct Counters {
     pub quotes: u64,
     pub orders_encoded: u64,
     pub encode_errors: u64,
+    /// Times the stream was resynchronised past an unfillable gap.
+    pub resyncs: u64,
+    /// Books dropped because a resync made their state untrustworthy.
+    pub book_resets: u64,
+    /// Messages skipped by those resynchronisations. Counted, never hidden: a
+    /// receiver that quietly resynchronises is indistinguishable from one that
+    /// never dropped anything.
+    pub messages_lost: u64,
 }
 
 /// The full path, generic over the book's level container.
@@ -135,6 +172,8 @@ pub struct Pipeline<L: Levels> {
     pub strategy: Strategy,
     tokens: TokenGen,
     out: [u8; ENTER_ORDER_LEN],
+    /// Segment payloads held while a gap is open, keyed by first sequence.
+    pending: BTreeMap<i64, Vec<u8>>,
     /// When set, `decide` re-looks-up the symbol instead of using the touch the
     /// update returned. Exists only so the optimisation log can measure the two
     /// against each other; production leaves it false.
@@ -157,6 +196,7 @@ impl<L: Levels> Pipeline<L> {
             strategy: Strategy::default(),
             tokens: TokenGen::default(),
             out: [0u8; ENTER_ORDER_LEN],
+            pending: BTreeMap::new(),
             redundant_lookup: false,
             counters: Counters::default(),
         }
@@ -190,6 +230,17 @@ impl<L: Levels> Pipeline<L> {
         let action = self
             .seq
             .observe(seg.session, seg.first_sequence, seg.message_count);
+        // Recover from an unfillable gap. Without this the reorder buffer grows
+        // forever behind a segment that was genuinely lost, and the pipeline
+        // silently stops delivering.
+        if self.seq.held_len() >= MAX_HELD_BEFORE_RESYNC {
+            let before = self.seq.stats.messages_lost;
+            while self.seq.held_len() >= MAX_HELD_BEFORE_RESYNC && self.seq.force_resync().is_some()
+            {
+                self.counters.resyncs += 1;
+            }
+            self.counters.messages_lost += self.seq.stats.messages_lost - before;
+        }
         if !matches!(action, Action::Deliver | Action::SessionReset) {
             return;
         }
@@ -273,13 +324,63 @@ impl<L: Levels> Pipeline<L> {
         let Ok(seg) = Segment::parse(dg.payload) else {
             return;
         };
-        if !matches!(
-            self.seq
-                .observe(seg.session, seg.first_sequence, seg.message_count),
-            Action::Deliver | Action::SessionReset
-        ) {
-            return;
+        let action = self
+            .seq
+            .observe(seg.session, seg.first_sequence, seg.message_count);
+
+        match action {
+            Action::Deliver | Action::SessionReset => {
+                self.deliver_segment(dg.payload);
+            }
+            Action::Buffered { .. } => {
+                // Keep the bytes. The sequencer knows the segment arrived; only
+                // the caller can replay what was in it.
+                if self.pending.len() < MAX_PENDING_SEGMENTS {
+                    self.pending.insert(seg.first_sequence, dg.payload.to_vec());
+                }
+            }
+            Action::Duplicate | Action::Heartbeat => return,
         }
+
+        // Give up on a gap that will not fill. Without this the buffer grows
+        // behind a segment that was genuinely lost and delivery stops.
+        if self.seq.held_len() >= MAX_HELD_BEFORE_RESYNC {
+            let before = self.seq.stats.messages_lost;
+            while self.seq.held_len() >= MAX_HELD_BEFORE_RESYNC && self.seq.force_resync().is_some()
+            {
+                self.counters.resyncs += 1;
+            }
+            self.counters.messages_lost += self.seq.stats.messages_lost - before;
+            // A resync means messages were skipped, so the book now reflects a
+            // state that never existed -- levels whose deletes were lost stay
+            // forever. There is no way to know which symbols are affected,
+            // because the missing messages are by definition unknown, so the
+            // only sound response is to drop it and rebuild.
+            self.book.clear();
+            self.counters.book_resets += 1;
+        }
+
+        self.drain_pending();
+    }
+
+    /// Replay any buffered segments the sequencer has now advanced past.
+    #[inline]
+    fn drain_pending(&mut self) {
+        while let Some((&seq, _)) = self.pending.iter().next() {
+            if seq >= self.seq.expected() {
+                break;
+            }
+            let bytes = self.pending.remove(&seq).expect("just observed");
+            self.deliver_segment(&bytes);
+        }
+    }
+
+    /// Process one segment's messages.
+    #[inline]
+    fn deliver_segment(&mut self, payload: &[u8]) {
+        let Ok(seg) = Segment::parse(payload) else {
+            return;
+        };
         for body in seg.messages() {
             let Ok(msg) = deep::parse(body) else { continue };
             self.counters.messages += 1;
