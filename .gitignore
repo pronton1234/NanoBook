@@ -10,3 +10,11 @@ data/
 
 # Benchmark output
 *.hgrm
+
+# C++ build output
+cpp/build/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

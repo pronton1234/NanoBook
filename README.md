@@ -16,7 +16,8 @@ Nothing is simulated in the browser.
 | real IEX messages decoded, zero errors | **40,223,554** |
 | crossed books at an event boundary | **0** |
 | measurement bugs caught before publication | **8** |
-| external dependencies | **1** (`thiserror`) |
+| external dependencies | **1** Rust crate (`thiserror`), **0** C++ |
+| languages | Rust · C++20 · Python |
 
 ```
 receive    strip Ethernet / 802.1Q VLAN / IPv4 / UDP
@@ -40,6 +41,72 @@ speedup. A histogram reporting its own bucket count as a p99. An audit that
 returned "zero crossed books" because it inspected the book after the market
 closed. Those are in the repository because catching them is the skill the
 project is actually about.
+
+## Three languages, each where it belongs
+
+**Rust** owns the wire — framing, sequencing, decoding, the book — because that
+is where nanoseconds and memory safety both matter.
+
+**C++20** is a second, independent implementation of the same decode and book
+path, plus the pricing library. Two implementations in different languages that
+agree on every count is a far stronger correctness argument than one that passes
+its own tests.
+
+**Python** owns the statistics, because that is where iteration speed matters and
+a hand-rolled regression would be a liability rather than a demonstration.
+Re-implementing the decoder there would mean two decoders that can silently
+disagree — exactly the hazard this project keeps finding.
+
+### The cross-language comparison
+
+Both read the same file and must produce identical counts. They do: 351,903
+messages, 33 levels, 35,500 total size, zero crossed books, from either.
+
+The first C++ run came in at **233 ns/packet against Rust's 140**. The cause was
+not the language: `std::unordered_map` is *required by the standard* to be
+node-based, so references stay valid across rehash and every lookup is a pointer
+chase, while Rust's `HashMap` is an open-addressed SwissTable. Replacing it with
+an open-addressed map took C++ to **146 ns**, inside the run-to-run spread of
+Rust's 162 ns.
+
+Which is the honest conclusion: **the gap was a data structure, not a language.**
+
+### Derivatives pricing, from scratch
+
+Black-Scholes with all five Greeks as closed-form derivatives, implied
+volatility by Newton with a bisection fallback, and a Monte Carlo engine with
+antithetic and control variates.
+
+The tests are the point. Put-call parity holds to 1e-10 — a model-free identity
+that follows from arbitrage alone. Every analytic Greek matches a central finite
+difference. And the Monte Carlo **95% confidence interval contains the analytic
+price**, rather than merely being near it; the standard error falls as 1/√N, so
+the engine can be trusted on the Asian option that has no closed form.
+
+One finding worth its own line. Implied volatility is **not identified** for a
+deep in-the-money option at low volatility: at S=125, K=100, vol=5%, vega is
+4e-6, so a price matched to 1e-8 still leaves the volatility uncertain in the
+third decimal. Many volatilities produce that price. The solver returns the
+conditioning alongside the answer and flags it, because reporting a number there
+would be the same error as a histogram reporting its bucket count as a p99.
+
+### Order flow imbalance, with controls
+
+OFI regressed on next-bucket returns, using OLS with Newey-West standard errors
+written out rather than imported — because textbook OLS errors assume
+independent residuals, high-frequency data has neither, and the bias is
+*downward*, which makes insignificant results look significant.
+
+Run against synthetic data, so the honest expectation is a **null result**, and
+both controls are reported:
+
+| control | result |
+|---|---|
+| **positive** — data built with β = 0.002 | recovered **0.0020002**, 95% CI contains truth |
+| **negative** — no signal exists | **t = −1.65**, not significant, R² = 0.006 |
+
+An estimator that reports nothing everywhere reports nothing here too. The
+positive control is what makes the null meaningful.
 
 ## Status
 

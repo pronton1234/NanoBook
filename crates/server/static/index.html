@@ -4,179 +4,832 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Latency Ladder</title>
+<meta name="description" content="A tick-to-trade market data pipeline in Rust: 110.4 ns/packet, 40,223,554 real IEX messages decoded with zero errors, and eight measurement bugs caught before publication.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-  :root {
-    --bg: #0d1117; --panel: #161b22; --line: #21262d;
-    --ink: #e6edf3; --dim: #8b949e; --faint: #6e7681;
-    --accent: #58a6ff; --good: #3fb950; --warn: #d29922; --bad: #f85149;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
-  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.02em; }
-  .sub { color: var(--dim); margin: 0 0 32px; }
-  a { color: var(--accent); }
-  h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em;
-    color: var(--faint); margin: 36px 0 12px; font-weight: 600;
-  }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; }
-  .grid { display: grid; gap: 14px; }
-  .g3 { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-  .stat .k { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; }
-  .stat .v { font-family: var(--mono); font-size: 24px; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .stat .n { color: var(--dim); font-size: 12px; }
-  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
-  th { text-align: left; color: var(--faint); font-weight: 500; padding: 6px 10px 6px 0; font-size: 11px;
-       text-transform: uppercase; letter-spacing: 0.06em; }
-  td { padding: 5px 10px 5px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-  td.num { text-align: right; }
-  .ok { color: var(--good); } .warnc { color: var(--warn); } .badc { color: var(--bad); }
-  .ctl { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-end; }
-  .ctl label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 6px; }
-  input[type=range] { width: 190px; accent-color: var(--accent); }
-  select, button {
-    background: #21262d; color: var(--ink); border: 1px solid #30363d;
-    border-radius: 6px; padding: 7px 14px; font-size: 14px; font-family: inherit;
-  }
-  button { cursor: pointer; font-weight: 600; }
-  button:hover:not(:disabled) { background: #30363d; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .status { display: flex; align-items: center; gap: 10px; font-size: 14px; margin-top: 16px; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
-  .dot.live { background: var(--good); box-shadow: 0 0 0 4px rgba(63,185,80,.15); }
-  .dot.busy { background: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
-  .dot.dead { background: var(--bad); }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
-  .note { color: var(--dim); font-size: 13px; }
-  .val { font-family: var(--mono); color: var(--ink); }
-  code { font-family: var(--mono); font-size: 12.5px; background: #21262d; padding: 1px 5px; border-radius: 4px; }
-  .banner { border-left: 3px solid var(--warn); padding: 12px 16px; background: #1c1a12; border-radius: 0 6px 6px 0;
-            color: var(--dim); font-size: 13.5px; margin-bottom: 20px; }
-  .flow { font-family: var(--mono); font-size: 12.5px; color: var(--dim); line-height: 1.85; white-space: pre; overflow-x: auto; }
-  .flow b { color: var(--ink); font-weight: 600; }
+/* ------------------------------------------------------------------ *
+ * Latency Ladder — single file, no external assets beyond Google Fonts.
+ * Committed dark instrument palette: every colour is painted explicitly
+ * so the page holds on any host ground.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: dark;
+
+  --ground:   #090c11;
+  --panel:    #101520;
+  --raised:   #151b27;
+  --rule:     #222b3a;
+  --rule-soft:#19202c;
+
+  --text:     #e8ecf4;
+  --dim:      #98a3b8;
+  --faint:    #626d82;
+
+  --accent:   #5ac8d8;
+  --accent-d: #2c7b87;
+  --warn:     #e9a94a;
+  --bad:      #f2705c;
+  --good:     #7fd69b;
+
+  /* Sequential ramp: six stops for six ordered pipeline stages.
+     Position on the ramp encodes stage order, never magnitude. */
+  --s1: #1f6570;
+  --s2: #2a8391;
+  --s3: #37a0ad;
+  --s4: #55bcc7;
+  --s5: #85d4db;
+  --s6: #b3e7eb;
+
+  --sans: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.62;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration-color: rgba(90,200,216,.35); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--accent); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+.wrap { max-width: 1140px; margin: 0 auto; padding: 0 22px; }
+
+/* ---------- section rhythm ---------- */
+
+.section { padding: 62px 0; border-top: 1px solid var(--rule); }
+.section:first-of-type { border-top: 0; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 0 0 14px;
+}
+
+h2 {
+  font-size: clamp(22px, 3.4vw, 29px);
+  font-weight: 700;
+  letter-spacing: -.022em;
+  line-height: 1.16;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  margin: 0 0 6px;
+}
+
+p { margin: 0 0 14px; }
+.prose { max-width: 64ch; color: var(--dim); }
+.prose strong, .prose b { color: var(--text); font-weight: 600; }
+.prose:last-child { margin-bottom: 0; }
+
+.lede { font-size: 16.5px; }
+
+.stack { display: grid; gap: 26px; }
+
+/* ---------- hero ---------- */
+
+.hero { padding: 58px 0 44px; }
+
+.title {
+  font-size: clamp(38px, 8vw, 68px);
+  font-weight: 700;
+  letter-spacing: -.038em;
+  line-height: 1;
+  margin: 0 0 18px;
+}
+
+.thesis {
+  max-width: 40ch;
+  font-size: clamp(17px, 2.4vw, 21px);
+  line-height: 1.45;
+  color: var(--dim);
+  letter-spacing: -.012em;
+  margin: 0 0 26px;
+}
+.thesis b { color: var(--text); font-weight: 600; }
+
+.herolinks { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 46px; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  letter-spacing: .04em;
+  padding: 7px 13px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+}
+.pill:hover { border-color: var(--accent-d); background: var(--raised); }
+.pill .tick { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+
+/* ---------- the headline number sheet ---------- */
+
+.sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 22px 30px;
+}
+.fig { border-top: 1px solid var(--rule); padding-top: 13px; }
+.fig .v {
+  font-family: var(--mono);
+  font-size: clamp(24px, 3.6vw, 31px);
+  font-weight: 500;
+  letter-spacing: -.03em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.fig .v .u { font-size: .56em; color: var(--dim); margin-left: 3px; letter-spacing: 0; }
+.fig .k {
+  font-size: 12.5px; color: var(--dim); margin-top: 7px; line-height: 1.4;
+}
+.fig .n {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  margin-top: 4px; line-height: 1.45;
+}
+.fig.zero .v { color: var(--good); }
+
+/* ---------- panels ---------- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 20px 22px;
+}
+.panel.tight { padding: 16px 18px; }
+
+.cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+
+/* ---------- the ladder ---------- */
+
+.ladder { display: grid; gap: 1px; background: var(--rule-soft); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+.rung {
+  display: grid;
+  grid-template-columns: 30px 104px minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  background: var(--panel);
+}
+.rung .ix {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.rung .nm { font-family: var(--mono); font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.rung .ds { font-size: 13px; color: var(--dim); line-height: 1.45; }
+.rung .cost {
+  font-family: var(--mono); font-size: 13.5px; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.rung .cost .u { color: var(--faint); font-size: 11px; }
+
+.rung .bar {
+  grid-column: 2 / 4;
+  height: 4px; border-radius: 2px; background: var(--rule);
+  overflow: hidden;
+}
+.rung .bar i { display: block; height: 100%; width: var(--w); border-radius: 2px; background: var(--c); }
+
+.rung.r1 { --c: var(--s1); } .rung.r2 { --c: var(--s2); } .rung.r3 { --c: var(--s3); }
+.rung.r4 { --c: var(--s4); } .rung.r5 { --c: var(--s5); } .rung.r6 { --c: var(--s6); }
+.rung .nm { color: var(--c); }
+
+.rung.r4 .cost { font-weight: 600; }
+
+@media (max-width: 620px) {
+  .rung { grid-template-columns: 26px minmax(0, 1fr) 70px; row-gap: 8px; }
+  .rung .ds { grid-column: 2 / 4; }
+  .rung .bar { grid-column: 2 / 4; }
+}
+
+/* ---------- coordinated omission demo ---------- */
+
+.co { display: grid; gap: 20px; }
+
+.segmented {
+  display: inline-flex; padding: 3px; gap: 3px;
+  background: var(--raised); border: 1px solid var(--rule); border-radius: 9px;
+}
+.segmented button {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 500;
+  padding: 8px 15px; border-radius: 6px; border: 0;
+  background: transparent; color: var(--dim); cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background .18s ease, color .18s ease;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button[aria-pressed="true"] { background: var(--accent-d); color: #eafbfd; }
+
+.corows { display: grid; gap: 18px; }
+.corow { display: grid; gap: 8px; }
+.corow .top { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.corow .lab { font-size: 13px; color: var(--dim); min-width: 0; flex: 1 1 auto; }
+.corow .lab b { color: var(--text); font-weight: 600; display: block; font-size: 14px; }
+.corow .num {
+  font-family: var(--mono);
+  font-size: clamp(26px, 5.4vw, 40px);
+  font-weight: 500; letter-spacing: -.035em; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.corow .track { height: 10px; border-radius: 5px; background: var(--rule-soft); border: 1px solid var(--rule); overflow: hidden; }
+.corow .track i { display: block; height: 100%; width: 6%; transition: width .55s cubic-bezier(.22,.7,.3,1); }
+
+.corow.service .num { color: var(--accent); }
+.corow.service .track i { background: linear-gradient(90deg, var(--accent-d), var(--accent)); }
+.corow.truth .num { color: var(--bad); }
+.corow.truth .track i { background: linear-gradient(90deg, #7a3a34, var(--bad)); }
+
+.coverdict {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px;
+  border-top: 1px solid var(--rule); padding-top: 16px;
+}
+.coverdict .x {
+  font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--warn);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.coverdict .t { font-size: 13.5px; color: var(--dim); max-width: 56ch; }
+
+.axis {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  letter-spacing: .06em;
+  border-top: 1px solid var(--rule-soft); padding-top: 7px;
+}
+
+/* ---------- tables ---------- */
+
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+th {
+  text-align: left; color: var(--faint); font-weight: 500;
+  padding: 0 12px 8px 0; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: .1em; white-space: nowrap;
+}
+td { padding: 9px 12px 9px 0; border-top: 1px solid var(--rule); font-variant-numeric: tabular-nums; vertical-align: top; }
+td.num { text-align: right; white-space: nowrap; }
+td:last-child, th:last-child { padding-right: 0; }
+.note { color: var(--dim); font-family: var(--sans); font-size: 12.5px; line-height: 1.5; }
+.ok { color: var(--good); }
+.warnc { color: var(--warn); }
+.badc { color: var(--bad); }
+
+/* bake-off + budget inline bars */
+.minibar { display: block; height: 5px; border-radius: 3px; background: var(--rule); overflow: hidden; min-width: 70px; margin-top: 6px; }
+.minibar i { display: block; height: 100%; background: var(--accent-d); }
+.minibar.win i { background: var(--accent); }
+.minibar.lose i { background: #4a5568; }
+
+/* ---------- bug list ---------- */
+
+.bugs { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+.bug { background: var(--panel); padding: 16px 18px; display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 8px 20px; align-items: baseline; }
+.bug .rep {
+  font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--warn);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.bug .rep small { display: block; font-size: 10.5px; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin-top: 3px; font-weight: 500; }
+.bug .why { font-size: 13.5px; color: var(--dim); line-height: 1.5; }
+.bug .why b { color: var(--text); font-weight: 600; }
+@media (max-width: 620px) { .bug { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- live controls ---------- */
+
+.ctl { display: flex; flex-wrap: wrap; gap: 20px 26px; align-items: flex-end; }
+.ctl label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 7px; }
+.val { font-family: var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
+
+input[type=range] { width: 186px; max-width: 100%; accent-color: var(--accent); }
+
+select, button.act {
+  background: var(--raised); color: var(--text);
+  border: 1px solid var(--rule); border-radius: 7px;
+  padding: 8px 14px; font-size: 13.5px; font-family: var(--sans);
+}
+select { font-family: var(--mono); font-size: 12.5px; }
+button.act { cursor: pointer; font-weight: 600; }
+button.act:hover:not(:disabled) { background: #1d2532; border-color: var(--accent-d); }
+button.act:disabled { opacity: .42; cursor: not-allowed; }
+button.act.primary { background: var(--accent-d); border-color: var(--accent-d); color: #eafbfd; }
+button.act.primary:hover:not(:disabled) { background: #348e9c; border-color: #348e9c; }
+
+.status { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 15px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot.live { background: var(--good); box-shadow: 0 0 0 4px rgba(127,214,155,.14); }
+.dot.busy { background: var(--warn); animation: pulse 1.15s ease-in-out infinite; }
+.dot.dead { background: var(--bad); }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .28 } }
+
+.banner {
+  border-left: 2px solid var(--accent-d);
+  padding: 2px 0 2px 16px;
+  color: var(--dim); font-size: 13.5px; line-height: 1.55;
+  max-width: 72ch;
+}
+.banner b { color: var(--text); font-weight: 600; }
+
+.subhead {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .13em; color: var(--faint); margin: 0 0 10px; font-weight: 500;
+}
+
+/* budget table flags */
+tr.unres td { background: rgba(233,169,74,.06); }
+tr.unres td:first-child { box-shadow: inset 2px 0 0 var(--warn); }
+.flag {
+  display: inline-block; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .09em; text-transform: uppercase; font-weight: 500;
+  color: var(--warn); border: 1px solid rgba(233,169,74,.4);
+  border-radius: 4px; padding: 1px 6px; white-space: nowrap;
+}
+
+/* ---------- footer ---------- */
+
+footer { border-top: 1px solid var(--rule); padding: 34px 0 60px; color: var(--faint); font-size: 12.5px; }
+footer .row { display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center; justify-content: space-between; }
+footer .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: .02em; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
 </style>
 </head>
 <body>
+
 <div class="wrap">
 
-  <h1>Latency Ladder</h1>
-  <p class="sub">A tick-to-trade market data pipeline in Rust — wire bytes in, order bytes out.
-     <a href="https://github.com/pronton1234/LatencyLadder">Source</a></p>
+  <!-- ============================ HERO ============================ -->
+  <header class="hero">
+    <p class="eyebrow">Rust · IEX DEEP · tick-to-trade</p>
+    <h1 class="title">Latency Ladder</h1>
+    <p class="thesis">Wire bytes in, order bytes out. A market data feed handler, order book and
+      tick-to-trade pipeline &mdash; where <b>measuring it honestly turned out to be harder than building it</b>.</p>
 
-  <div class="banner" id="hostNote">
-    Numbers below are measured <b>live, on this host</b>, by the same code the repository benchmarks.
-    Every figure is shown with its run-to-run spread, and a difference smaller than that spread is
-    reported as <b>unresolved</b> rather than as a result.
-  </div>
-
-  <h2>The path</h2>
-  <div class="panel flow"><b>receive</b>   strip Ethernet / 802.1Q VLAN / IPv4 / UDP
-<b>sequence</b>  IEX-TP segments · gap detection · retransmit · A/B arbitration
-<b>parse</b>     DEEP binary decode, fixed-width, zero allocation
-<b>book</b>      aggregated-depth order book, sorted structure-of-arrays
-<b>decide</b>    strategy hook (deliberately trivial — a placeholder in the budget)
-<b>encode</b>    OUCH-style Enter Order</div>
-
-  <h2>Perturb the feed</h2>
-  <div class="panel">
-    <div class="ctl">
-      <div>
-        <label>Offered load — <span class="val" id="loadV">90%</span> of capacity</label>
-        <input type="range" id="load" min="10" max="200" step="10" value="90">
-      </div>
-      <div>
-        <label>Packet loss — <span class="val" id="gapV">0%</span></label>
-        <input type="range" id="gap" min="0" max="10" step="1" value="0">
-      </div>
-      <div>
-        <label>B feed (duplicate every segment)</label>
-        <select id="dup"><option value="0">off</option><option value="1">on</option></select>
-      </div>
-      <div>
-        <label>Level container</label>
-        <select id="container">
-          <option value="sorted">sorted SoA (R1)</option>
-          <option value="btree">BTreeMap (R0)</option>
-        </select>
-      </div>
-      <button id="go">Run</button>
-    </div>
-    <div class="status"><span class="dot" id="dot"></span><span id="msg">Checking the backend…</span></div>
-  </div>
-
-  <div id="results" style="display:none">
-    <h2>Throughput</h2>
-    <div class="grid g3">
-      <div class="panel stat"><div class="k">tick-to-trade</div><div class="v" id="nsPacket">—</div>
-        <div class="n" id="spreadNote">per packet</div></div>
-      <div class="panel stat"><div class="k">messages decoded</div><div class="v" id="messages">—</div>
-        <div class="n" id="pktNote">&nbsp;</div></div>
-      <div class="panel stat"><div class="k">orders encoded</div><div class="v" id="orders">—</div>
-        <div class="n">from the placeholder strategy</div></div>
+    <div class="herolinks">
+      <a class="pill" href="https://github.com/pronton1234/LatencyLadder">Source on GitHub</a>
+      <a class="pill" href="https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml"><span class="tick"></span>CI passing</a>
+      <a class="pill" href="#live">Run it live &darr;</a>
     </div>
 
-    <h2>Transport — what the wire did to the feed</h2>
-    <div class="panel">
+    <div class="sheet">
+      <div class="fig">
+        <div class="v">110.4<span class="u">ns</span></div>
+        <div class="k">Tick-to-trade, per packet</div>
+        <div class="n">88.5 ns per message</div>
+      </div>
+      <div class="fig">
+        <div class="v">40,223,554</div>
+        <div class="k">Real IEX messages decoded</div>
+        <div class="n">0 errors · 0 unknown types</div>
+      </div>
+      <div class="fig zero">
+        <div class="v">0</div>
+        <div class="k">Crossed books at an event boundary</div>
+        <div class="n">across 38,993,905 updates</div>
+      </div>
+      <div class="fig">
+        <div class="v">8</div>
+        <div class="k">Measurement bugs caught before publication</div>
+        <div class="n">none of them crashed</div>
+      </div>
+      <div class="fig">
+        <div class="v">1</div>
+        <div class="k">External dependency across six crates</div>
+        <div class="n">thiserror</div>
+      </div>
+      <div class="fig">
+        <div class="v">109<span class="u">+2</span></div>
+        <div class="k">Tests, plus two loom model checks</div>
+        <div class="n">SPSC queue, every interleaving</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ THE LADDER ============================ -->
+  <section class="section">
+    <p class="eyebrow">What it is</p>
+    <h2>Six stages between a UDP packet and an order</h2>
+    <p class="prose lede">A <strong>feed handler</strong> is the thing that turns an exchange's raw
+      network traffic into a usable picture of the market. Market data arrives as UDP multicast:
+      framed, segmented, sequenced, and lossy. Nothing about it is a file you can open and parse.</p>
+
+    <div class="ladder" style="margin-top:26px">
+      <div class="rung r1">
+        <span class="ix">01</span>
+        <span class="nm">receive</span>
+        <span class="ds">Strip Ethernet, 802.1Q VLAN, IPv4, UDP. Zero copy.</span>
+        <span class="cost">10.2<span class="u"> ns</span></span>
+        <span class="bar" style="--w:12.8%"><i></i></span>
+      </div>
+      <div class="rung r2">
+        <span class="ix">02</span>
+        <span class="nm">sequence</span>
+        <span class="ds">IEX-TP segments, gap detection, retransmit, A/B feed arbitration.</span>
+        <span class="cost">8.8<span class="u"> ns</span></span>
+        <span class="bar" style="--w:11.1%"><i></i></span>
+      </div>
+      <div class="rung r3">
+        <span class="ix">03</span>
+        <span class="nm">parse</span>
+        <span class="ds">DEEP binary decode. Fixed width, fixed point, no allocation.</span>
+        <span class="cost">26.7<span class="u"> ns</span></span>
+        <span class="bar" style="--w:33.6%"><i></i></span>
+      </div>
+      <div class="rung r4">
+        <span class="ix">04</span>
+        <span class="nm">book</span>
+        <span class="ds">Aggregated-depth order book, sorted structure-of-arrays. The dominant stage.</span>
+        <span class="cost">79.4<span class="u"> ns</span></span>
+        <span class="bar" style="--w:100%"><i></i></span>
+      </div>
+      <div class="rung r5">
+        <span class="ix">05</span>
+        <span class="nm">decide</span>
+        <span class="ds">Strategy hook. Deliberately trivial &mdash; a placeholder holding a slot in the budget.</span>
+        <span class="cost">5.2<span class="u"> ns</span></span>
+        <span class="bar" style="--w:6.5%"><i></i></span>
+      </div>
+      <div class="rung r6">
+        <span class="ix">06</span>
+        <span class="nm">encode</span>
+        <span class="ds">OUCH-style Enter Order, written straight to the wire buffer.</span>
+        <span class="cost">13.0<span class="u"> ns</span></span>
+        <span class="bar" style="--w:16.4%"><i></i></span>
+      </div>
+    </div>
+    <p class="prose" style="margin-top:14px; font-size:12.5px">Stage costs measured by cumulative
+      prefix on a pinned machine. You can re-measure them on this host in the
+      <a href="#live">live instrument</a> below.</p>
+  </section>
+
+  <!-- ============================ TRANSPORT ============================ -->
+  <section class="section">
+    <p class="eyebrow">Why the transport layer is the hard part</p>
+    <h2>Most order-book projects start after the difficult work is already done</h2>
+    <p class="prose lede">They open a file of already de-framed messages and begin parsing.
+      Framing, segmentation, loss, reordering and duplication have all been solved for them by
+      someone else. That layer is where this project lives.</p>
+
+    <div class="cols" style="margin-top:26px">
+      <div class="panel">
+        <h3>Every message arrives twice</h3>
+        <p class="prose" style="margin:0; font-size:13.5px">Exchanges publish market data down two
+          physically separate network paths. You take whichever copy lands first and discard the
+          other. Both feeds carry <strong>identical sequence numbers</strong>, which collapses the
+          whole problem: A/B arbitration is not an algorithm, it is deduplication by sequence over
+          the merged stream. No A/B-specific branch exists, so the two paths cannot disagree.</p>
+      </div>
+      <div class="panel">
+        <h3>A gap is not yet a loss</h3>
+        <p class="prose" style="margin:0; font-size:13.5px">UDP reorders, so a missing sequence
+          number is buffered rather than declared lost &mdash; declaring on first sight would fire
+          constantly on a healthy feed. If the hole persists you request retransmission. If the
+          retransmission never comes you resync, and you <strong>record exactly what you lost</strong>
+          rather than quietly carrying on with a wrong book.</p>
+      </div>
+      <div class="panel">
+        <h3>The wire lies in small ways</h3>
+        <p class="prose" style="margin:0 0 10px; font-size:13.5px">Four traps found by running
+          against real captures, not by reading the spec:</p>
+        <div class="scroll">
+        <table>
+          <tbody>
+            <tr><td>802.1Q</td><td class="note">Every IEX frame is VLAN-tagged. Assuming IPv4 at the usual offset lands four bytes early and misparses the entire file.</td></tr>
+            <tr><td>.pcap</td><td class="note">Two different formats ship under one extension. A classic reader emits plausible garbage from a pcapng file rather than failing.</td></tr>
+            <tr><td>endian</td><td class="note">Byte order flips mid-packet: Ethernet, IPv4 and UDP are big-endian, IEX-TP and below are little-endian.</td></tr>
+            <tr><td>65%</td><td class="note">Of segments in a quiet session are heartbeats. Letting one advance the sequence silently resets the stream.</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ COORDINATED OMISSION ============================ -->
+  <section class="section">
+    <p class="eyebrow">The flagship measurement error</p>
+    <h2>Coordinated omission: how a benchmark hides its own stalls</h2>
+    <p class="prose lede">Most benchmarks measure <strong>service time</strong> &mdash; how long an
+      item took once work began on it. When the system stalls, the items queued behind the stall are
+      never measured at all, so the stall vanishes from the histogram. Measure instead from each
+      item's <strong>scheduled arrival</strong> and it reappears.</p>
+
+    <div class="panel co" style="margin-top:26px">
+      <div>
+        <p class="subhead">Offered load, as a fraction of capacity</p>
+        <div class="segmented" role="group" aria-label="Offered load">
+          <button type="button" data-co="0" aria-pressed="true">50%</button>
+          <button type="button" data-co="1" aria-pressed="false">90%</button>
+          <button type="button" data-co="2" aria-pressed="false">110%</button>
+        </div>
+      </div>
+
+      <div class="corows">
+        <div class="corow service">
+          <div class="top">
+            <span class="lab"><b>Service time p50</b>measured once work began</span>
+            <span class="num" id="coService">90 ns</span>
+          </div>
+          <span class="track"><i id="coServiceBar" style="width:7.5%"></i></span>
+        </div>
+        <div class="corow truth">
+          <div class="top">
+            <span class="lab"><b>Corrected latency p50</b>measured from scheduled arrival</span>
+            <span class="num" id="coTruth">125 ns</span>
+          </div>
+          <span class="track"><i id="coTruthBar" style="width:10%"></i></span>
+        </div>
+        <div class="axis"><span>100 ns</span><span>10 µs</span><span>1 ms</span><span>30 ms</span></div>
+      </div>
+
+      <div class="coverdict">
+        <span class="x" id="coRatio">1.4&times;</span>
+        <span class="t" id="coText">Below capacity the queue drains between items, so the two agree.
+          A benchmark run only here would look correct.</span>
+      </div>
+    </div>
+
+    <p class="prose" style="margin-top:16px">Service time does not move: <strong>90 ns at every
+      load</strong>. It is not lying about the work it timed &mdash; it is answering a different
+      question than the one anybody cares about. The system that reports 90 ns at 110% of capacity
+      is, in reality, fifteen milliseconds behind the market.</p>
+  </section>
+
+  <!-- ============================ MEASUREMENT BUGS ============================ -->
+  <section class="section">
+    <p class="eyebrow">Measurement discipline</p>
+    <h2>Eight benchmarking bugs. None of them crashed.</h2>
+    <p class="prose lede">Every one produced a plausible number that a reader would have believed.
+      Four of the eight:</p>
+
+    <div class="bugs" style="margin-top:24px">
+      <div class="bug">
+        <div class="rep">&minus;239 ns<small>stage cost</small></div>
+        <div class="why">A stage that <b>gave time back</b>. Page faults on the first pass were
+          charged to the warm run before it, and subtracting cumulative prefixes turned the
+          difference negative. The fix is warming, not arithmetic &mdash; and the impossible sign is
+          the only reason it was visible.</div>
+      </div>
+      <div class="bug">
+        <div class="rep">1.38&times;<small>threading speedup</small></div>
+        <div class="why">A speedup that <b>never happened</b>. Configurations were timed in blocks
+          rather than interleaved, so thermal and scheduler drift over the run landed entirely on one
+          of them. Interleaved, the difference disappears into the noise.</div>
+      </div>
+      <div class="bug">
+        <div class="rep">512<small>reported p99</small></div>
+        <div class="why">A histogram reporting <b>its own bucket count</b> as the value at the 99th
+          percentile. Dimensionally meaningless, and in the right order of magnitude for a
+          nanosecond figure, which is exactly why it survived review.</div>
+      </div>
+      <div class="bug">
+        <div class="rep">0<small>crossed books</small></div>
+        <div class="why">The right answer for the wrong reason. The audit inspected the book
+          <b>after market close</b>, when it was empty. An invariant checked against nothing always
+          holds.</div>
+      </div>
+    </div>
+
+    <p class="prose" style="margin-top:22px">This is why every figure the live instrument reports
+      carries its <strong>run-to-run spread</strong>, and why a difference smaller than that spread
+      is published as <strong>unresolved</strong> rather than as a result.</p>
+  </section>
+
+  <!-- ============================ LIVE ============================ -->
+  <section class="section" id="live">
+    <p class="eyebrow">Live instrument</p>
+    <h2>Perturb the feed and re-measure</h2>
+
+    <div class="banner" id="hostNote">
+      Every number below is measured <b>live, on this host</b>, by the same code the repository
+      benchmarks &mdash; nothing is simulated in the browser. The host is shared cloud CPU, so its
+      spread is wide and its absolute figures are not the repository's headline.
+    </div>
+
+    <div class="panel" style="margin-top:22px">
+      <div class="ctl">
+        <div>
+          <label for="load">Offered load &mdash; <span class="val" id="loadV">90%</span> of capacity</label>
+          <input type="range" id="load" min="10" max="200" step="10" value="90">
+        </div>
+        <div>
+          <label for="gap">Packet loss &mdash; <span class="val" id="gapV">0%</span></label>
+          <input type="range" id="gap" min="0" max="10" step="1" value="0">
+        </div>
+        <div>
+          <label for="dup">B feed (duplicate every segment)</label>
+          <select id="dup"><option value="0">off</option><option value="1">on</option></select>
+        </div>
+        <div>
+          <label for="container">Level container</label>
+          <select id="container">
+            <option value="sorted">sorted SoA (R1)</option>
+            <option value="btree">BTreeMap (R0)</option>
+          </select>
+        </div>
+        <button class="act primary" id="go" type="button">Run the pipeline</button>
+      </div>
+      <div class="status"><span class="dot" id="dot"></span><span id="msg">Checking the backend&hellip;</span></div>
+    </div>
+
+    <div id="results" style="display:none">
+      <div class="stack" style="margin-top:26px">
+
+        <div>
+          <p class="subhead">Throughput</p>
+          <div class="sheet">
+            <div class="fig">
+              <div class="v" id="nsPacket">&mdash;</div>
+              <div class="k">Tick-to-trade</div>
+              <div class="n" id="spreadNote">per packet</div>
+            </div>
+            <div class="fig">
+              <div class="v" id="messages">&mdash;</div>
+              <div class="k">Messages decoded</div>
+              <div class="n" id="pktNote">&nbsp;</div>
+            </div>
+            <div class="fig">
+              <div class="v" id="orders">&mdash;</div>
+              <div class="k">Orders encoded</div>
+              <div class="n">from the placeholder strategy</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="subhead">Transport &mdash; what the wire did to the feed</p>
+          <div class="panel tight scroll">
+            <table>
+              <thead><tr><th>Property</th><th class="num">Count</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td>B-feed duplicates suppressed</td><td class="num" id="dups">&mdash;</td>
+                    <td class="note">Arbitration is deduplication by sequence over the merged stream.</td></tr>
+                <tr><td>Gaps detected</td><td class="num" id="gaps">&mdash;</td>
+                    <td class="note">Consecutive drops merge into one gap, so this sits below the injected count.</td></tr>
+                <tr><td>Segments dropped by the network</td><td class="num" id="gapsInj">&mdash;</td>
+                    <td class="note">Injected loss, shown for comparison.</td></tr>
+                <tr><td>Crossed books at an event boundary</td><td class="num" id="crossed">&mdash;</td>
+                    <td class="note">Must be zero. The one hard invariant a book has.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <p class="subhead">Coordinated omission, measured on this host</p>
+          <div class="panel tight scroll">
+            <table>
+              <thead><tr><th></th><th class="num">p50</th><th class="num">p99</th></tr></thead>
+              <tbody>
+                <tr><td>Service time (the flattering one)</td><td class="num" id="sp50">&mdash;</td><td class="num" id="sp99">&mdash;</td></tr>
+                <tr><td>Corrected latency (the honest one)</td><td class="num" id="cp50">&mdash;</td><td class="num" id="cp99">&mdash;</td></tr>
+                <tr><td>Packets behind schedule</td><td class="num" id="behind">&mdash;</td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <p class="subhead">Top of book</p>
+          <div class="panel tight scroll">
+            <table>
+              <thead><tr><th>Symbol</th><th class="num">Bid</th><th class="num">Size</th><th class="num">Ask</th>
+                  <th class="num">Size</th><th class="num">Bid lvls</th><th class="num">Ask lvls</th></tr></thead>
+              <tbody id="book"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- stage budget -->
+    <div style="margin-top:34px">
+      <p class="subhead">Stage budget</p>
+      <div class="panel">
+        <p class="prose" style="margin:0 0 16px; font-size:13.5px; max-width:70ch">Nine timed passes,
+          measured by cumulative prefix: each stage's cost is the difference between running the
+          pipeline up to it and up to the one before. Where that difference is smaller than the
+          run-to-run spread, the row is flagged <span class="flag">unresolved</span> &mdash; the
+          measurement cannot tell the two apart, so it does not claim to.</p>
+        <button class="act" id="budgetGo" type="button">Measure the stage budget</button>
+        <div class="note" id="budgetNote" style="margin-top:14px">Takes a few seconds &mdash; nine passes, run one at a time.</div>
+        <div class="scroll" id="budgetOut" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ DESIGN DECISIONS ============================ -->
+  <section class="section">
+    <p class="eyebrow">Where the design came from</p>
+    <h2>The data chose the data structure</h2>
+
+    <div class="cols" style="margin-bottom:26px">
+      <div class="panel">
+        <div class="fig" style="border:0; padding:0">
+          <div class="v">97<span class="u">%</span></div>
+          <div class="k">of feed traffic is price-level updates</div>
+        </div>
+        <p class="prose" style="margin:12px 0 0; font-size:13.5px">Measured over a full trading day:
+          48.80% sell updates, 48.14% buy, 2.94% trade reports, 0.12% everything else. The book's
+          add / update / delete path <strong>is</strong> the cost of the system, which makes the
+          container choice the whole engineering problem rather than a detail.</p>
+      </div>
+      <div class="panel">
+        <div class="fig" style="border:0; padding:0">
+          <div class="v">2<span class="u">levels</span></div>
+          <div class="k">median book depth, over a 480-tick span</div>
+        </div>
+        <p class="prose" style="margin:12px 0 0; font-size:13.5px">This killed the textbook flat-array
+          design. An array indexed by price tick pays for 480 slots to hold a median of two occupied
+          levels &mdash; it spends the entire cache line budget on emptiness. Measuring the depth
+          first is what stopped that from being built.</p>
+      </div>
+    </div>
+
+    <p class="subhead">Container bake-off &mdash; cost per book update</p>
+    <div class="panel tight scroll">
       <table>
-        <tr><th>property</th><th class="num">count</th><th>meaning</th></tr>
-        <tr><td>B-feed duplicates suppressed</td><td class="num" id="dups">—</td>
-            <td class="note">arbitration is deduplication by sequence over the merged stream</td></tr>
-        <tr><td>gaps detected</td><td class="num" id="gaps">—</td>
-            <td class="note">consecutive drops merge into one gap, so this is below the injected count</td></tr>
-        <tr><td>segments dropped by the network</td><td class="num" id="gapsInj">—</td>
-            <td class="note">injected loss, for comparison</td></tr>
-        <tr><td>crossed books at an event boundary</td><td class="num" id="crossed">—</td>
-            <td class="note">must be zero; the one hard invariant a book has</td></tr>
+        <thead><tr><th>Container</th><th class="num">ns / update</th><th class="num">vs baseline</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>sorted structure-of-arrays<span class="minibar win"><i style="width:47.7%"></i></span></td>
+            <td class="num ok">49.6</td><td class="num ok">1.20&times;</td>
+            <td class="note">Shipped. Contiguous, branch-predictable, and shallow books make the linear scan free.</td>
+          </tr>
+          <tr>
+            <td>inline levels<span class="minibar lose"><i style="width:50.0%"></i></span></td>
+            <td class="num">51.9</td><td class="num">1.15&times;</td>
+            <td class="note">Lost. Close enough to be tempting, not close enough to justify the fixed capacity.</td>
+          </tr>
+          <tr>
+            <td>BTreeMap<span class="minibar lose"><i style="width:57.4%"></i></span></td>
+            <td class="num">59.6</td><td class="num">baseline</td>
+            <td class="note">The correct reference the fast path is differentially tested against.</td>
+          </tr>
+          <tr>
+            <td>arena<span class="minibar lose"><i style="width:100%"></i></span></td>
+            <td class="num badc">103.9</td><td class="num badc">0.57&times;</td>
+            <td class="note">Lost badly. Pointer chasing costs more than the allocation it avoids.</td>
+          </tr>
+        </tbody>
       </table>
     </div>
+  </section>
 
-    <h2>Coordinated omission — service time vs the truth</h2>
-    <div class="panel">
-      <p class="note" style="margin-top:0">
-        Most benchmarks measure <b>service time</b>: how long an item took once work began. When a system
-        stalls, the items queued behind the stall are measured late or not at all, and the stall disappears.
-        Corrected latency measures from each item's <b>scheduled</b> arrival, so a stall is charged to
-        everything behind it. Drive the load slider past 100% and watch the two diverge.
-      </p>
+  <!-- ============================ CORRECTNESS ============================ -->
+  <section class="section">
+    <p class="eyebrow">Correctness</p>
+    <h2>What is actually verified</h2>
+    <div class="scroll panel tight">
       <table>
-        <tr><th></th><th class="num">p50</th><th class="num">p99</th></tr>
-        <tr><td>service time (the flattering one)</td><td class="num" id="sp50">—</td><td class="num" id="sp99">—</td></tr>
-        <tr><td>corrected latency (the honest one)</td><td class="num" id="cp50">—</td><td class="num" id="cp99">—</td></tr>
-        <tr><td>packets behind schedule</td><td class="num" id="behind">—</td><td></td></tr>
+        <tbody>
+          <tr><td>40,223,554</td><td class="note">Real IEX messages decoded across a full 4.8 GB trading day &mdash; zero errors, zero unknown message types, zero sequence gaps.</td></tr>
+          <tr><td>0</td><td class="note">Crossed books at an event boundary across 38,993,905 updates. IEX splits one logical book event across several messages, so the book is legitimately crossed in between; the check is gated on the feed's event-complete flag, which keeps it strict exactly where it means something.</td></tr>
+          <tr><td>2</td><td class="note">Independent implementations &mdash; a throwaway Python decoder written first, then the Rust &mdash; agreeing exactly on every per-type message count.</td></tr>
+          <tr><td>109 + 2</td><td class="note">Tests, plus the SPSC queue model-checked under loom across every interleaving the memory model permits. Development is on ARM64, whose weak memory model breaks lock-free code that x86's TSO would have hidden.</td></tr>
+          <tr><td>1</td><td class="note">External dependency (<code style="font-family:var(--mono)">thiserror</code>) across six crates.</td></tr>
+        </tbody>
       </table>
     </div>
+  </section>
 
-    <h2>Top of book</h2>
-    <div class="panel">
-      <table>
-        <tr><th>symbol</th><th class="num">bid</th><th class="num">size</th><th class="num">ask</th>
-            <th class="num">size</th><th class="num">bid lvls</th><th class="num">ask lvls</th></tr>
-        <tbody id="book"></tbody>
-      </table>
+  <footer>
+    <div class="row">
+      <span class="mono">Latency Ladder &mdash; tick-to-trade market data pipeline in Rust</span>
+      <span class="mono"><a href="https://github.com/pronton1234/LatencyLadder">github.com/pronton1234/LatencyLadder</a></span>
     </div>
-  </div>
-
-  <h2>Measured on a pinned machine</h2>
-  <div class="panel">
-    <p class="note" style="margin-top:0">
-      The figures above come from whatever host is serving this page, which is shared cloud CPU — so its
-      spread is large and its absolute numbers are not the repository's headline. Those were measured
-      separately and are reported in the README with the same caveats attached.
-    </p>
-    <table>
-      <tr><th>measurement</th><th class="num">value</th></tr>
-      <tr><td>tick-to-trade, single thread</td><td class="num">110.4 ns/packet</td></tr>
-      <tr><td>real IEX messages decoded, zero errors</td><td class="num">40,223,554</td></tr>
-      <tr><td>book update — the dominant stage</td><td class="num">51.6 ns</td></tr>
-      <tr><td>sorted SoA vs BTreeMap</td><td class="num">1.20×</td></tr>
-      <tr><td>measurement bugs caught before publication</td><td class="num">8</td></tr>
-    </table>
-  </div>
+    <p style="margin:14px 0 0; max-width:70ch; line-height:1.5">Market data provided for free by IEX.
+      Captures are fetched, never committed. Headline latency figures are measured on a pinned
+      machine; figures produced by the live instrument come from shared cloud CPU and carry a
+      correspondingly wider spread.</p>
+  </footer>
 
 </div>
 
@@ -218,6 +871,7 @@ async function waitForWarm() {
       if (h.warm) {
         warm = true;
         $("go").disabled = false;
+        $("budgetGo").disabled = false;
         setStatus("live", `Ready — ${h.arch}, warmed in ${h.warmup_ms} ms, ${h.runs_served} runs served`);
         return;
       }
@@ -290,10 +944,112 @@ function render(d) {
       <td class="num">${t.bid_levels}</td><td class="num">${t.ask_levels}</td></tr>`).join("");
 }
 
+// ---------------------------------------------------------------------
+// Stage budget: /budget runs nine timed passes and reports each stage as
+// the difference between two cumulative prefixes. Where that difference is
+// smaller than the spread, the server marks it unresolved and the row is
+// flagged rather than quietly presented as a result.
+// ---------------------------------------------------------------------
+async function budget() {
+  if (!warm) return;
+  $("budgetGo").disabled = true;
+  $("budgetNote").textContent = "Measuring — nine timed passes, run one at a time.";
+  try {
+    const r = await fetch(API + "/budget", { cache: "no-store" });
+    if (r.status === 503) {
+      $("budgetNote").textContent = "Still warming — a measurement taken now would report the host waking up.";
+      $("budgetGo").disabled = false;
+      return;
+    }
+    renderBudget(await r.json());
+  } catch (e) {
+    $("budgetNote").textContent = "Budget request failed: " + e.message;
+  }
+  $("budgetGo").disabled = false;
+}
+
+function renderBudget(d) {
+  const stages = d.stages || [];
+  const max = stages.reduce((m, s) => Math.max(m, s.this_stage), 0) || 1;
+
+  const rows = stages.map((s, i) => {
+    const w = Math.max(0, (s.this_stage / max) * 100).toFixed(1);
+    const cls = s.unresolved ? "lose" : (i === 0 ? "win" : "");
+    const flag = s.unresolved ? '<span class="flag">unresolved</span>' : "";
+    return `
+      <tr class="${s.unresolved ? "unres" : ""}">
+        <td>${s.name}<span class="minibar ${cls}"><i style="width:${w}%"></i></span></td>
+        <td class="num ${s.unresolved ? "warnc" : ""}">${s.this_stage.toFixed(1)}</td>
+        <td class="num">&plusmn;${s.spread.toFixed(1)}</td>
+        <td class="num">${s.cumulative.toFixed(1)}</td>
+        <td>${flag}</td>
+      </tr>`;
+  }).join("");
+
+  $("budgetOut").innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Stage</th><th class="num">This stage (ns)</th><th class="num">Spread</th>
+        <th class="num">Cumulative (ns)</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  const u = d.unresolved;
+  $("budgetNote").innerHTML = u > 0
+    ? `<b style="color:var(--warn)">${u} of ${d.of} stage costs unresolved</b> on ${d.arch} — the difference between those prefixes is inside the run-to-run spread, so no cost is claimed for them.`
+    : `All ${d.of} stage costs resolved on ${d.arch} — each is larger than its own run-to-run spread.`;
+}
+
+// ---------------------------------------------------------------------
+// Static coordinated-omission demo. Runs without the backend so the page
+// works on GitHub Pages cold. Bars are log-scaled: linear scaling would
+// render the 50% and 90% cases as an identical sliver of nothing, which is
+// the same flattening the bug itself performs.
+// ---------------------------------------------------------------------
+const CO = [
+  { label: "50%",  service: 90, truth: 125,
+    ratio: "1.4×",
+    text: "Below capacity the queue drains between items, so the two agree. A benchmark run only here would look correct." },
+  { label: "90%",  service: 90, truth: 5420,
+    ratio: "60×",
+    text: "Queueing has begun and service time has not moved by a nanosecond. The histogram is already sixty times optimistic." },
+  { label: "110%", service: 90, truth: 14970000,
+    ratio: "166,000×",
+    text: "Past capacity the queue never drains. Service time still reports 90 ns while the system runs fifteen milliseconds behind the market." },
+];
+
+// log10 scale from 100 ns (1.5) to ~30 ms (7.5)
+function coWidth(ns) {
+  const lo = 1.5, hi = 7.5;
+  const t = (Math.log10(Math.max(ns, 10)) - lo) / (hi - lo);
+  return (Math.min(Math.max(t, 0.02), 1) * 100).toFixed(1) + "%";
+}
+
+function setCo(i) {
+  const c = CO[i];
+  $("coService").textContent = fmtNs(c.service);
+  $("coTruth").textContent = fmtNs(c.truth);
+  $("coServiceBar").style.width = coWidth(c.service);
+  $("coTruthBar").style.width = coWidth(c.truth);
+  $("coRatio").textContent = c.ratio;
+  $("coText").textContent = c.text;
+  document.querySelectorAll("[data-co]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(Number(b.dataset.co) === i));
+  });
+}
+
+document.querySelectorAll("[data-co]").forEach((b) => {
+  b.onclick = () => setCo(Number(b.dataset.co));
+});
+setCo(0);
+
 $("load").oninput = (e) => ($("loadV").textContent = e.target.value + "%");
 $("gap").oninput = (e) => ($("gapV").textContent = e.target.value + "%");
 $("go").onclick = run;
+$("budgetGo").onclick = budget;
 $("go").disabled = true;
+$("budgetGo").disabled = true;
 waitForWarm();
 </script>
 </body>

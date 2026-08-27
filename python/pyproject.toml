@@ -1,0 +1,12 @@
+[project]
+name = "latency-ladder-analysis"
+version = "0.1.0"
+description = "Statistical analysis of book state exported by the Rust pipeline."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "matplotlib>=3.7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
