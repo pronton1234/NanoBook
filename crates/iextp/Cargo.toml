@@ -1,0 +1,12 @@
+[package]
+name = "iextp"
+version = "0.1.0"
+description = "IEX-TP v1 transport: pcap framing, segment sequencing, A/B feed arbitration."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]

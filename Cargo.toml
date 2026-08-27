@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["crates/iextp"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+thiserror = "2"
+
+# Latency work needs the optimiser fully unleashed and a single codegen unit so
+# cross-crate inlining actually happens. `lto = "fat"` over "thin" costs build
+# time and buys inlining across the parse/book boundary, which is the hot path.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = 1          # keep symbols: a profile without them is not actionable
+
+# Benchmarks inherit release codegen but keep unwinding, which criterion needs.
+[profile.bench]
+inherits = "release"
