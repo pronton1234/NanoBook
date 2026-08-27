@@ -73,9 +73,10 @@ where the floor is.
 
 ## Status
 
-Early. The transport layer (`crates/iextp`) and the DEEP message decoder
-(`crates/deep`) are implemented and validated against real captures. The order
-book and pipeline are next.
+The transport layer (`crates/iextp`), the DEEP message decoder (`crates/deep`)
+and the order book (`crates/book`) are implemented, validated against real
+captures, and benchmarked. The tick-to-trade pipeline and the R2 kernel-bypass
+rung are next.
 
 ## What works today
 
