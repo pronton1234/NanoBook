@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use iextp::{frame, pcap::PcapReader, segment::Segment, sequencer::Sequencer, FrameSkip};
+use iextp::{capture::Capture, frame, segment::Segment, sequencer::Sequencer, FrameSkip};
 
 fn main() {
     let path = match std::env::args().nth(1) {
@@ -26,7 +26,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let reader = match PcapReader::new(&buf) {
+    let reader = match Capture::open(&buf) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{path}: {e}");
@@ -35,10 +35,11 @@ fn main() {
     };
     println!("{path}");
     println!(
-        "  {} bytes, linktype {}, snaplen {}",
+        "  {} bytes, {:?}, linktype {}, snaplen {}",
         buf.len(),
-        reader.linktype,
-        reader.snaplen
+        reader.format(),
+        reader.linktype(),
+        reader.snaplen()
     );
 
     let mut packets = 0u64;

@@ -30,8 +30,9 @@ real captures. The DEEP message parser, order book, and pipeline are next.
 
 `crates/iextp` — IEX-TP v1 transport, zero-copy throughout:
 
-- **pcap reading** with all four magic variants (byte order × microsecond/
-  nanosecond timestamps)
+- **capture reading** in both formats IEX ships — classic pcap (all four magic
+  variants: byte order × microsecond/nanosecond timestamps) and pcapng —
+  detected by magic and presented as one iterator
 - **frame stripping** — Ethernet, 802.1Q VLAN, IPv4, UDP
 - **segment parsing** — the 40-byte IEX-TP header and its length-prefixed
   messages
@@ -55,15 +56,32 @@ No A/B-specific branch, no clock comparison, so the two paths cannot disagree.
 ## Verification
 
 Two independent implementations — a throwaway Python decoder written first, then
-the Rust — agree exactly on a real capture:
+the Rust — agree exactly on the 2017 capture, including every per-type message
+count:
 
 ```
 packets   20,145      messages   48,635      sequence gaps   0
 ```
 
-...and on every per-type message count. Unit tests on synthetic frames prove the
-code does what I *think* the format is; only a real capture proves I understood
-the format.
+A full 2018 trading day, 4.8 GB:
+
+```
+packets  30,300,122   messages  40,223,554   gaps 0   duplicates 0   session resets 0
+                                             7.1 M msg/s, 0.85 GB/s single-threaded
+```
+
+Which settles what the hot path is, and it is not close:
+
+| message | share |
+|---|---|
+| Price Level Update (sell) | 48.80% |
+| Price Level Update (buy) | 48.14% |
+| Trade Report | 2.94% |
+| everything else | 0.12% |
+
+**97% of traffic is price-level updates.** The book's add/update/delete path is
+effectively the whole cost of the system, which is what makes the data-structure
+choice in R1 the entire engineering problem rather than a detail.
 
 ```bash
 cargo test
@@ -74,9 +92,24 @@ cargo run --release --example replay -- data/raw/<capture>.pcap
 
 Each of these was found by running against a capture, not by reading a spec:
 
+- **IEX ships two different formats under one `.pcap` extension.** The 2017 file
+  is classic pcap; the 2018 file is pcapng. A classic-pcap reader does not fail
+  on a pcapng file — it walks a 24-byte header and 16-byte record headers over
+  block structure and emits plausible garbage. The Python decoder did exactly
+  that, reporting price-level updates as 2.8% of traffic when the real figure is
+  97%, and inventing dozens of nonexistent message types. The Rust refused the
+  file instead: `not a pcap file: magic 0x0a0d0d0a`. Sniffing by magic rather
+  than extension, and failing loudly on an unknown one, is the only reason the
+  discrepancy was visible at all.
 - **Every IEX frame carries an 802.1Q VLAN tag.** A parser assuming IPv4 begins
   at the usual offset 14 lands four bytes early, inside the VLAN header, and
   misparses every packet in the file.
+- **pcapng timestamp resolution is per-interface**, from the `if_tsresol` option,
+  defaulting to microseconds. Getting it wrong scales every timestamp by 1000
+  with no error raised.
+- **pcapng `linktype` is not known until iteration reaches the interface block.**
+  Reporting `0` before then is not a harmless default: 0 is BSD loopback, so the
+  wrong answer looks like a real one.
 - **Byte order flips mid-packet.** Ethernet, IPv4 and UDP are big-endian;
   IEX-TP and everything below it is little-endian.
 - **65% of segments in a quiet session are heartbeats** (`message_count == 0`).

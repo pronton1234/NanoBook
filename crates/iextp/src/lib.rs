@@ -24,13 +24,17 @@
 //! Nothing here allocates per packet. Every layer narrows a borrow of the mapped
 //! file, so a message body is a subslice of the original bytes.
 
+pub mod capture;
 pub mod frame;
 pub mod pcap;
+pub mod pcapng;
 pub mod segment;
 pub mod sequencer;
 
+pub use capture::{Capture, Format};
 pub use frame::{Datagram, FrameSkip};
 pub use pcap::{Packet, PcapReader, LINKTYPE_ETHERNET};
+pub use pcapng::PcapNgReader;
 pub use segment::{Segment, HEADER_LEN, PROTOCOL_DEEP, PROTOCOL_TOPS};
 pub use sequencer::{Action, Sequencer, Stats};
 
