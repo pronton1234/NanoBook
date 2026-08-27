@@ -1,0 +1,13 @@
+[package]
+name = "deep"
+version = "0.1.0"
+description = "IEX DEEP 1.0 message decoding: fixed-point prices, symbols, typed messages."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+iextp = { path = "../iextp" }

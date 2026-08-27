@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "deep"
+version = "0.1.0"
+dependencies = [
+ "iextp",
+ "thiserror",
+]
+
+[[package]]
 name = "iextp"
 version = "0.1.0"
 dependencies = [

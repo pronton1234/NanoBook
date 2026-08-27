@@ -23,8 +23,9 @@ where the floor is.
 
 ## Status
 
-Early. The transport layer (`crates/iextp`) is implemented and validated against
-real captures. The DEEP message parser, order book, and pipeline are next.
+Early. The transport layer (`crates/iextp`) and the DEEP message decoder
+(`crates/deep`) are implemented and validated against real captures. The order
+book and pipeline are next.
 
 ## What works today
 
@@ -39,6 +40,15 @@ real captures. The DEEP message parser, order book, and pipeline are next.
 - **sequencing** — gap detection, reorder buffering, duplicate suppression,
   session-reset handling
 - **A/B feed arbitration**
+
+`crates/deep` — DEEP 1.0 message decoding, no allocation, no floating point:
+
+- **fixed-point prices** (`i64`, 1/10000 dollar) with no `f64` conversion offered
+  at all, so a price cannot round-trip through a float by accident
+- **8-byte inline symbols**, compared as a single `u64`
+- **typed messages** with the 80-byte auction message borrowed rather than
+  inlined, keeping the hot-path enum inside a cache line — pinned by a test
+- **length validation** per type, since DEEP is fixed-width
 
 ### On A/B arbitration
 
@@ -120,6 +130,16 @@ Each of these was found by running against a capture, not by reading a spec:
 - **A gap is not immediately a loss.** UDP reorders, so out-of-order segments are
   buffered; declaring loss on first sight would fire constantly on a healthy
   feed.
+- **A wrong bit mask that no unit test could catch.** The DEEP "event processing
+  complete" flag is bit 0; I implemented bit 7. Nothing failed — the synthetic
+  tests were built from the same wrong belief and passed happily. Real data
+  showed it instantly, because the decoder claimed **100%** of updates were
+  mid-event, and a market where no book event ever completes does not exist.
+  It reads 36% on the fixture once corrected.
+
+That last one is the argument for validating against captures rather than
+fixtures. A test you write from your own reading of a spec proves the code
+matches your belief, not that your belief matches the wire.
 
 ## Data
 
