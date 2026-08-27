@@ -13,9 +13,65 @@ pipeline at three levels of the stack and measures each one.
 
 | rung | what changes | status |
 |---|---|---|
-| **R0** naive | allocating, `BTreeMap`, blocking sockets | book done |
-| **R1** optimized | zero-copy, sorted structure-of-arrays levels | book done |
+| **R0** naive | allocating, `BTreeMap`, blocking sockets | done |
+| **R1** optimized | zero-copy, sorted structure-of-arrays levels | pipeline done |
 | **R2** kernel bypass | AF_XDP, busy-poll, pinned cores, IRQ affinity | planned |
+
+### The tick-to-trade path
+
+Wire bytes in, order bytes out — receive, sequence, parse, book, decide, encode.
+The strategy is deliberately trivial (join a wide, stable spread); it exists to
+occupy its real place in the budget, since a measurement that stops at the book
+update is timing a feed handler and calling it a trading system.
+
+**110.4 ns per packet, 88.5 ns per message**, over 2M packets of a real session:
+2,496,143 messages, 2,398,061 book updates, 2,065,378 orders encoded, 0 errors.
+
+Stages are timed by **cumulative prefix** — run the pipeline up to each stage and
+difference — because `Instant::now()` costs ~28 ns here and six clock reads per
+message would report a budget dominated by the act of measuring it.
+
+| stage | cumulative | this stage | noise |
+|---|---|---|---|
+| receive (eth/vlan/ip/udp) | 7.9 ns | 7.9 ns | 8.6 ns |
+| sequence (IEX-TP, A/B) | 16.8 ns | 8.9 ns | 10.5 ns |
+| parse (DEEP) | 37.4 ns | 20.6 ns | 15.2 ns |
+| book update | 89.0 ns | 51.6 ns | 23.3 ns |
+| decide (strategy) | 96.8 ns | 7.9 ns | 14.0 ns ⚠ |
+| encode (OUCH order) | 110.4 ns | 13.6 ns | 13.4 ns |
+
+The **noise column is not decoration**. It is the run-to-run spread, and any
+stage whose cost falls below it is flagged rather than quoted — a positive
+number below the noise floor is still not a measurement. macOS offers no core
+pinning or CPU isolation, so the per-stage split needs the pinned x86 Linux box
+(R2) before it is quotable. The total is a large aggregate and holds.
+
+Getting here took two corrections. Timing the stages in sequence let thermal
+drift accumulate along the stage order and produced a **negative** cost for
+`decide` (−239 ns) — impossible, and the only reason the underlying bug was
+visible: the first prefix to build a book was paying every page fault for ~6,000
+symbol entries while later prefixes reused warm pages. An inflated but still
+positive number would have been published as a finding. Now the full pipeline is
+warmed once before any timing, and repetitions are round-robin across stages.
+
+### Coordinated omission, demonstrated rather than asserted
+
+Most latency benchmarks measure *service time* — how long an item took once work
+began — and call it latency. When the system stalls, the items queued behind the
+stall are measured late or not at all, and the stall disappears.
+
+Driving the pipeline at three loads makes the difference impossible to miss:
+
+| offered load | behind schedule | service p50 | **corrected p50** |
+|---|---|---|---|
+| 50% of capacity | 26.1% | 84 ns | 125 ns |
+| 90% of capacity | 79.2% | 84 ns | 5.42 µs |
+| 110% of capacity | 99.5% | 84 ns | **14.97 ms** |
+
+Service time is **identical at every load**. A benchmark reporting it would show
+a pipeline equally fast at 50% and 110% of capacity — which is not a property any
+system has. The corrected figure, measured from each item's *scheduled* arrival,
+moves five orders of magnitude.
 
 ### The measurement changed the design
 

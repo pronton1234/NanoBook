@@ -1,0 +1,13 @@
+[package]
+name = "pipeline"
+version = "0.1.0"
+description = "Tick-to-trade pipeline: receive, parse, book, strategy, order encode, with a latency budget."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+book = { path = "../book" }
+deep = { path = "../deep" }
+iextp = { path = "../iextp" }
+thiserror = { workspace = true }
