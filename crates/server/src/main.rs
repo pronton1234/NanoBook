@@ -26,6 +26,7 @@
 //! result, which is the honest trade: a queue is better than a wrong number.
 
 mod bench;
+mod verify;
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -118,6 +119,19 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
         }
         "/run" => run_endpoint(&mut stream, query),
         "/budget" => budget_endpoint(&mut stream),
+        "/days" => {
+            let rows: Vec<String> = verify::SAMPLES
+                .iter()
+                .map(|s| format!(r#"{{"date":"{}","bytes":{}}}"#, s.date, s.bytes.len()))
+                .collect();
+            respond(
+                &mut stream,
+                200,
+                "application/json",
+                &format!("[{}]", rows.join(",")),
+            )
+        }
+        "/verify" => verify_endpoint(&mut stream, query),
         "/" | "/index.html" => respond(
             &mut stream,
             200,
@@ -186,6 +200,66 @@ fn budget_endpoint(stream: &mut TcpStream) -> std::io::Result<()> {
         unresolved,
         stages.len(),
         rows.join(",")
+    );
+    respond(stream, 200, "application/json", &body)
+}
+
+/// Decode one real exchange session and report whether it was understood.
+///
+/// Not gated on warm: this is a correctness check, not a timing measurement, so
+/// a cold host gives the same answer. It is still serialised through the same
+/// slot, because a decode running alongside a benchmark would perturb the
+/// benchmark even though it would not perturb itself.
+fn verify_endpoint(stream: &mut TcpStream, query: &str) -> std::io::Result<()> {
+    let date = param(query, "day").unwrap_or_default();
+    let Some(sample) = verify::find(&date) else {
+        return respond(
+            stream,
+            404,
+            "application/json",
+            r#"{"error":"unknown day","detail":"see /days for the sessions compiled into this build"}"#,
+        );
+    };
+
+    let _guard = slot().lock().unwrap_or_else(|e| e.into_inner());
+    let v = verify::verify(sample);
+
+    let types: Vec<String> = v
+        .types
+        .iter()
+        .map(|(name, n)| format!(r#"{{"name":"{name}","count":{n}}}"#))
+        .collect();
+    let quotes: Vec<String> = v
+        .quotes
+        .iter()
+        .map(|q| {
+            format!(
+                r#"{{"symbol":"{}","bid":"{}","bid_size":{},"ask":"{}","ask_size":{}}}"#,
+                q.symbol, q.bid, q.bid_size, q.ask, q.ask_size
+            )
+        })
+        .collect();
+
+    let body = format!(
+        r#"{{"date":"{}","format":"{}","bytes":{},"packets":{},"messages":{},"errors":{},"unknown":{},"symbols":{},"price_updates":{},"trades":{},"gaps":{},"duplicates":{},"crossed":{},"low":"{}","high":"{}","nanos":{},"types":[{}],"quotes":[{}]}}"#,
+        v.date,
+        v.format,
+        v.bytes,
+        v.packets,
+        v.messages,
+        v.errors,
+        v.unknown,
+        v.symbols,
+        v.price_updates,
+        v.trades,
+        v.gaps,
+        v.duplicates,
+        v.crossed,
+        v.low,
+        v.high,
+        v.nanos,
+        types.join(","),
+        quotes.join(",")
     );
     respond(stream, 200, "application/json", &body)
 }

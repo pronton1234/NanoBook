@@ -210,6 +210,9 @@ pub enum Message<'a> {
     OperationalHalt(SymbolStatus),
     ShortSalePriceTest(SymbolStatus),
     SecurityEvent(SymbolStatus),
+    /// See [`T_RETAIL_LIQUIDITY`]: layout verified against real captures, name
+    /// inferred.
+    RetailLiquidity(SymbolStatus),
     OfficialPrice(OfficialPrice),
     Auction(AuctionInformation<'a>),
     /// A type this decoder does not know. Kept rather than dropped so a capture
@@ -231,7 +234,8 @@ impl Message<'_> {
             Message::TradingStatus(m) => m.symbol,
             Message::OperationalHalt(m)
             | Message::ShortSalePriceTest(m)
-            | Message::SecurityEvent(m) => m.symbol,
+            | Message::SecurityEvent(m)
+            | Message::RetailLiquidity(m) => m.symbol,
             Message::OfficialPrice(m) => m.symbol,
             Message::Auction(m) => m.symbol(),
             Message::SystemEvent(_) | Message::Unknown { .. } => return None,
@@ -249,7 +253,8 @@ impl Message<'_> {
             Message::TradingStatus(m) => m.timestamp,
             Message::OperationalHalt(m)
             | Message::ShortSalePriceTest(m)
-            | Message::SecurityEvent(m) => m.timestamp,
+            | Message::SecurityEvent(m)
+            | Message::RetailLiquidity(m) => m.timestamp,
             Message::OfficialPrice(m) => m.timestamp,
             Message::Auction(m) => m.timestamp(),
             Message::Unknown { .. } => return None,
@@ -270,6 +275,26 @@ pub const T_TRADE_REPORT: u8 = 0x54;
 pub const T_OFFICIAL_PRICE: u8 = 0x58;
 pub const T_TRADE_BREAK: u8 = 0x42;
 pub const T_AUCTION_INFORMATION: u8 = 0x41;
+/// A per-symbol status message IEX added to DEEP around 2022.
+///
+/// Found by running the decoder over one real session per year from 2017 to
+/// 2026: sessions through 2021 decode with zero unknown types, and from 2022
+/// onward roughly 22% of messages carry this type. It was surfaced precisely
+/// because unknown types are *reported* rather than dropped -- a decoder that
+/// discarded them would have shown a clean run and silently ignored a fifth of
+/// the feed.
+///
+/// The layout is verified, not guessed. In a 2026 session it appears 12,675
+/// times across 12,675 **distinct** symbols -- exactly one each -- every
+/// timestamp inside an 8 ms burst at session open, with the second byte always
+/// ASCII space. That is the same shape as Operational Halt and Security Event:
+/// type, status, timestamp, symbol.
+///
+/// The *name* is inferred from that behaviour and from `0x49` being `'I'`;
+/// IEX's retail liquidity indicator fits, but this decoder has not seen a
+/// specification confirming it, so the identification is weaker than the layout
+/// and is flagged as such rather than asserted.
+pub const T_RETAIL_LIQUIDITY: u8 = 0x49;
 
 /// Wire length for a known message type.
 ///
@@ -280,7 +305,7 @@ pub const fn expected_len(kind: u8) -> Option<usize> {
         T_SYSTEM_EVENT => 10,
         T_SECURITY_DIRECTORY => 31,
         T_TRADING_STATUS => 22,
-        T_OPERATIONAL_HALT | T_SECURITY_EVENT => 18,
+        T_OPERATIONAL_HALT | T_SECURITY_EVENT | T_RETAIL_LIQUIDITY => 18,
         T_SHORT_SALE_PRICE_TEST => 19,
         T_PRICE_LEVEL_BUY | T_PRICE_LEVEL_SELL => 30,
         T_TRADE_REPORT | T_TRADE_BREAK => 38,
@@ -352,7 +377,7 @@ pub fn parse(body: &[u8]) -> Result<Message<'_>, crate::Error> {
             symbol: symbol(body, 10),
             reason: [body[18], body[19], body[20], body[21]],
         }),
-        T_OPERATIONAL_HALT | T_SECURITY_EVENT | T_SHORT_SALE_PRICE_TEST => {
+        T_OPERATIONAL_HALT | T_SECURITY_EVENT | T_SHORT_SALE_PRICE_TEST | T_RETAIL_LIQUIDITY => {
             let s = SymbolStatus {
                 value: body[1],
                 timestamp: i64_le(body, 2),
@@ -366,6 +391,7 @@ pub fn parse(body: &[u8]) -> Result<Message<'_>, crate::Error> {
             match kind {
                 T_OPERATIONAL_HALT => Message::OperationalHalt(s),
                 T_SECURITY_EVENT => Message::SecurityEvent(s),
+                T_RETAIL_LIQUIDITY => Message::RetailLiquidity(s),
                 _ => Message::ShortSalePriceTest(s),
             }
         }

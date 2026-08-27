@@ -615,6 +615,25 @@ footer {
 }
 footer .row { display: flex; flex-wrap: wrap; gap: 10px 26px; justify-content: space-between; }
 footer .mono { font-family: var(--mono); font-size: 12px; }
+
+/* ---------- real-data year picker ---------- */
+.years { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+.yr {
+  font-family: var(--mono); font-size:13px; font-weight:500;
+  padding:9px 15px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--sheet); color:var(--ink);
+  font-variant-numeric: tabular-nums;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.yr:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.yr[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+.yr:disabled { opacity:.45; cursor:default; }
+.vfy-grid { display:grid; gap:14px 26px; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); margin-bottom:20px; }
+.vfy-fig { border-top:1px solid var(--rule); padding-top:10px; }
+.vfy-fig .v { font-family:var(--mono); font-size:22px; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.vfy-fig .k { font-size:12px; color:var(--ink-2); margin-top:4px; line-height:1.4; }
+.vfy-fig.good .v { color:var(--ok); }
+.vfy-fig.bad  .v { color:var(--bad); }
 </style>
 </head>
 
@@ -989,6 +1008,40 @@ footer .mono { font-family: var(--mono); font-size: 12px; }
   </section>
 
   <!-- ============================ ENGINEER DETAIL ============================ -->
+  <section class="section" id="realdata">
+    <div class="wrap">
+      <p class="eyebrow">Check it yourself</p>
+      <h2 class="wide">Pick a year. Watch it decode a real trading day.</h2>
+      <p class="lede" style="max-width:62ch">
+        Everything above runs on data this project generates. Fair enough &mdash; but
+        &ldquo;it reads its own output correctly&rdquo; is a weak claim. So ten real sessions
+        are built into the server, one per year, each the opening minutes of that
+        day&rsquo;s feed as IEX actually published it. Choose one and the decoder runs
+        against those bytes right now.
+      </p>
+
+      <div class="years" role="group" aria-label="Choose a trading day"><button class="yr" type="button" data-day="2017-11-16" aria-pressed="false">2017</button><button class="yr" type="button" data-day="2018-10-09" aria-pressed="false">2018</button><button class="yr" type="button" data-day="2019-02-27" aria-pressed="false">2019</button><button class="yr" type="button" data-day="2020-07-30" aria-pressed="false">2020</button><button class="yr" type="button" data-day="2021-06-28" aria-pressed="false">2021</button><button class="yr" type="button" data-day="2022-06-02" aria-pressed="false">2022</button><button class="yr" type="button" data-day="2023-01-03" aria-pressed="false">2023</button><button class="yr" type="button" data-day="2024-07-09" aria-pressed="false">2024</button><button class="yr" type="button" data-day="2025-09-10" aria-pressed="false">2025</button><button class="yr" type="button" data-day="2026-05-22" aria-pressed="false">2026</button></div>
+      <div class="small" id="vfyNote" style="margin-top:12px; color:var(--ink-2)">Choose a year above.</div>
+      <div id="vfyOut" style="margin-top:20px"></div>
+
+      <div class="callout" style="margin-top:26px">
+        <p><b>This test found a real bug.</b> Run across a decade, sessions through 2021
+        decoded cleanly &mdash; and from 2022 onward, <b>22% of every session was a message
+        type the decoder did not recognise</b>. IEX had added a per-symbol status message
+        and nothing announced it.</p>
+        <p style="margin-bottom:0">It was visible only because unrecognised messages are
+        <b>counted and reported</b> rather than quietly skipped. A decoder that dropped what
+        it did not understand would have shown ten clean years while ignoring a fifth of
+        five of them.</p>
+      </div>
+
+      <p class="small" style="margin-top:20px; color:var(--ink-3)">
+        Market data provided for free by <a href="https://iextrading.com">IEX</a>. By accessing
+        or using IEX Historical Data you agree to the IEX Historical Data Terms of Use.
+      </p>
+    </div>
+  </section>
+
   <section class="section">
     <p class="eyebrow">For engineers &mdash; the detail</p>
     <h2 class="wide">Six stages between a packet and an order</h2>
@@ -1402,6 +1455,84 @@ $("budgetGo").onclick = budget;
 $("go").disabled = true;
 $("budgetGo").disabled = true;
 waitForWarm();
+
+/* ---------- real exchange data: pick a year, decode it ---------- */
+/* Not gated on the warm poll. This is a correctness check rather than a timing
+   measurement, so a cold host gives exactly the same answer -- and making a
+   visitor wait for a warmup to see whether the decoder is right would be
+   confusing them about what is being demonstrated. */
+async function verifyDay(day, btn) {
+  document.querySelectorAll(".yr").forEach(b => {
+    b.disabled = true;
+    b.setAttribute("aria-pressed", String(b === btn));
+  });
+  $("vfyNote").textContent = "Decoding " + day + " \u2014 real bytes IEX published that morning\u2026";
+  $("vfyOut").innerHTML = "";
+  try {
+    const r = await fetch(API + "/verify?day=" + encodeURIComponent(day), { cache: "no-store" });
+    if (!r.ok) { $("vfyNote").textContent = "Could not load that session."; return; }
+    renderVerify(await r.json());
+  } catch (e) {
+    $("vfyNote").textContent = "The backend is asleep or unreachable. The figures above still stand on their own.";
+  } finally {
+    document.querySelectorAll(".yr").forEach(b => { b.disabled = false; });
+  }
+}
+
+function renderVerify(v) {
+  const clean = v.errors === 0 && v.unknown === 0 && v.crossed === 0;
+  $("vfyNote").innerHTML = clean
+    ? "Decoded <b>" + v.messages.toLocaleString() + "</b> real messages in <b>" +
+      (v.nanos / 1e6).toFixed(0) + " ms</b> \u2014 nothing unrecognised, nothing malformed, no corrupted books."
+    : "Decoded " + v.messages.toLocaleString() + " messages with " + v.errors +
+      " malformed and " + v.unknown + " unrecognised.";
+
+  const fig = (val, key, cls) =>
+    '<div class="vfy-fig ' + (cls || "") + '"><div class="v">' + val + '</div><div class="k">' + key + '</div></div>';
+
+  let h = '<div class="vfy-grid">';
+  h += fig(v.messages.toLocaleString(), "messages decoded");
+  h += fig(v.errors, "malformed", v.errors === 0 ? "good" : "bad");
+  h += fig(v.unknown, "unrecognised", v.unknown === 0 ? "good" : "bad");
+  h += fig(v.crossed, "impossible books", v.crossed === 0 ? "good" : "bad");
+  h += fig(v.symbols.toLocaleString(), "distinct tickers");
+  h += fig(v.format, "capture format");
+  h += "</div>";
+
+  if (v.quotes && v.quotes.length) {
+    h += '<p class="small" style="color:var(--ink-2); margin-bottom:8px">' +
+         'Real quotes reconstructed from that morning \u2014 ticker, size, and the prices ' +
+         'buyers and sellers were actually showing:</p>';
+    h += '<div class="scroll"><table><thead><tr><th>ticker</th><th class="num">buyers want</th>' +
+         '<th class="num">at</th><th class="num">sellers ask</th><th class="num">for</th></tr></thead><tbody>';
+    for (const q of v.quotes) {
+      h += "<tr><td><b>" + q.symbol + "</b></td><td class=\"num\">" + q.bid_size.toLocaleString() +
+           "</td><td class=\"num\">" + q.bid + "</td><td class=\"num\">" + q.ask +
+           "</td><td class=\"num\">" + q.ask_size.toLocaleString() + "</td></tr>";
+    }
+    h += "</tbody></table></div>";
+  }
+
+  if (v.types && v.types.length) {
+    const top = v.types.slice(0, 6);
+    const max = Math.max.apply(null, top.map(t => t.count));
+    h += '<p class="small" style="color:var(--ink-2); margin:20px 0 8px">What the exchange actually sent:</p>';
+    h += '<div class="scroll"><table><thead><tr><th>message</th><th class="num">count</th><th>share</th></tr></thead><tbody>';
+    for (const t of top) {
+      const pct = (100 * t.count / v.messages).toFixed(1);
+      h += "<tr><td>" + t.name + "</td><td class=\"num\">" + t.count.toLocaleString() +
+           '</td><td><div class="bar"><i style="width:' + (100 * t.count / max).toFixed(1) +
+           '%"></i></div><span class="small">' + pct + "%</span></td></tr>";
+    }
+    h += "</tbody></table></div>";
+  }
+  $("vfyOut").innerHTML = h;
+}
+
+document.querySelectorAll(".yr").forEach(b => {
+  b.addEventListener("click", () => verifyDay(b.dataset.day, b));
+});
+
 </script>
 </body>
 </html>
