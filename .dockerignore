@@ -1,0 +1,14 @@
+# flyctl launch added from .gitignore
+**/.DS_Store
+
+# Rust
+**/target
+
+# Market data. IEX HIST files are large (0.7MB-12GB/day) and IEX retains
+# proprietary rights, so captures are fetched by `just fetch`, never committed.
+**/data
+!**/data/.gitkeep
+
+# Benchmark output
+**/*.hgrm
+fly.toml

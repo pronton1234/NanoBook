@@ -1,39 +1,33 @@
-# Fly.io deployment for the demo backend.
+# fly.toml app configuration file generated for latency-ladder on 2026-08-27T16:33:59-05:00
 #
-# The machine is deliberately small and allowed to stop when idle: this is a
-# portfolio demo, not a service, and a visitor watching a cold start is shown
-# what is happening rather than a spinner. The page polls /health and explains
-# the wait, because the reason for it -- a cold host measures itself waking up,
-# not the pipeline -- is one of the more interesting things on the page.
-app = "latency-ladder"
-primary_region = "iad"
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'latency-ladder'
+primary_region = 'iad'
 
 [build]
-
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  # Zero, so an idle demo costs nothing. The trade is the cold start, which is
-  # surfaced in the UI instead of hidden.
   min_machines_running = 0
 
   [http_service.concurrency]
-    type = "requests"
-    # The server already serialises benchmarks internally; this keeps queued
-    # requests from piling up on one machine.
-    soft_limit = 4
+    type = 'requests'
     hard_limit = 8
+    soft_limit = 4
 
-[checks.health]
-  type = "http"
-  port = 8080
-  path = "/health"
-  interval = "30s"
-  timeout = "5s"
-  grace_period = "20s"
+[checks]
+  [checks.health]
+    port = 8080
+    type = 'http'
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '20s'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
