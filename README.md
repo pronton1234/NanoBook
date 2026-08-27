@@ -13,9 +13,59 @@ pipeline at three levels of the stack and measures each one.
 
 | rung | what changes | status |
 |---|---|---|
-| **R0** naive | allocating, `BTreeMap`, blocking sockets | planned |
-| **R1** optimized | zero-copy, flat tick-indexed arrays, slab allocation | planned |
+| **R0** naive | allocating, `BTreeMap`, blocking sockets | book done |
+| **R1** optimized | zero-copy, sorted structure-of-arrays levels | book done |
 | **R2** kernel bypass | AF_XDP, busy-poll, pinned cores, IRQ affinity | planned |
+
+### The measurement changed the design
+
+R1 was *going* to be a flat array indexed by price tick, with a bitmap to find
+the touch — the standard answer for a hot order book. Measuring the book's actual
+shape first killed it. Sampled every million messages across 6,530 symbols on a
+full trading day:
+
+| | p50 | p90 | p99 | max |
+|---|---|---|---|---|
+| levels per side | **2** | 5 | 14 | 52 |
+| price span (¢ ticks) | **480** | 1,713 | 4,907 | 26,361,001 |
+
+Books are shallow **and** sparse: the median side holds two levels spread over
+480 ticks. A flat array would reserve ~2KB to store 24 bytes and walk cache lines
+of zeros on every touch lookup — losing by two orders of magnitude on the axis it
+was chosen for.
+
+So R1 is a sorted structure-of-arrays instead, with a linear scan rather than a
+binary search, because at five elements the branch predictor beats the algorithm.
+
+### The bake-off, and two wrong guesses
+
+5M real updates, 6,085 symbols, 40.7% deletes. Best of five runs (minimum, not
+mean — the slow runs measure the machine's background noise, not the code):
+
+| container | ns/update | vs R0 | container's share |
+|---|---|---|---|
+| *floor: no container at all* | *13.2* | — | — |
+| `BTreeMap` (R0) | 61.7 | 1.00x | 48.5 ns (79%) |
+| **sorted SoA (R1)** | **52.3** | **1.18x** | 39.1 ns (75%) |
+| inline SoA (R1b) | 54.3 | 1.14x | 41.1 ns (76%) |
+
+All three produce byte-identical books, so no container is fast by being wrong.
+
+Two hypotheses about where the time went, both **falsified by measurement**:
+
+1. *"The symbol hash lookup dominates."* It does not — the whole book path
+   without any container is 13.2 ns, a fifth of the total.
+2. *"Inlining the levels will remove a cache miss and win."* It lost. Storing 8
+   levels in the struct grew `SymbolBook` from ~112 to ~208 bytes, roughly
+   doubling the hash table's backing array to ~1.27MB, and the table's own cache
+   pressure cost more than the indirection it removed.
+
+The container is 75–79% of the update either way, and 39 ns for a scan over two
+elements is still far too slow to be the scan. The remaining suspect is that
+every symbol's levels are a separately-allocated `Vec`, scattered across the
+heap — which points at arena-allocating level storage contiguously and keeping
+only an index in the `SymbolBook`. Not yet built, not yet measured, so not yet
+claimed.
 
 The interesting part is not the throughput figure. It is *what dominates* at
 each rung — allocation, then cache misses, then the kernel network stack — and
@@ -49,6 +99,32 @@ book and pipeline are next.
 - **typed messages** with the 80-byte auction message borrowed rather than
   inlined, keeping the hot-path enum inside a cache line — pinned by a test
 - **length validation** per type, since DEEP is fixed-width
+
+`crates/book` — aggregated-depth book with the level container behind a trait,
+so the R0/R1 bake-off is a swap rather than a rewrite:
+
+- **`BTreeLevels`** (R0) — the ordered-map baseline. Correct, and the reference
+  the fast implementation gets differentially tested against.
+- **per-symbol books** keyed by a custom hasher — `HashMap`'s SipHash default is
+  right for untrusted keys and pure overhead for exchange tickers
+- **invariant checking** — crossed and locked books counted separately, gated on
+  the feed's event-complete flag
+
+### On the crossed-book invariant
+
+IEX splits one logical book event across several messages, so the published book
+is *legitimately* crossed in between. Bit 0 of the price level update flags is
+the feed saying "I am mid-event, do not look yet".
+
+A validator that asserts on every message therefore fires constantly on a healthy
+feed, and the natural response — relaxing the assert — discards the one invariant
+that catches real corruption. Gating on the flag keeps it strict exactly where it
+means something.
+
+There is a useful coupling in that: this is the same flag whose mask was wrong in
+the decoder. Had it stayed wrong, every message would read as mid-event and the
+crossed check would have **silently never run**. Two independent things had to be
+right for the check to work at all.
 
 ### On A/B arbitration
 

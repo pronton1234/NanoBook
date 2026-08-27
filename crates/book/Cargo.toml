@@ -1,0 +1,13 @@
+[package]
+name = "book"
+version = "0.1.0"
+description = "Aggregated-depth order book with pluggable price-level containers."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+deep = { path = "../deep" }
+
+[dev-dependencies]
+iextp = { path = "../iextp" }

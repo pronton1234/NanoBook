@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "book"
+version = "0.1.0"
+dependencies = [
+ "deep",
+ "iextp",
+]
+
+[[package]]
 name = "deep"
 version = "0.1.0"
 dependencies = [
