@@ -54,6 +54,37 @@ symbol entries while later prefixes reused warm pages. An inflated but still
 positive number would have been published as a finding. Now the full pipeline is
 warmed once before any timing, and repetitions are round-robin across stages.
 
+### Does splitting it across two cores help? No.
+
+The natural split puts the wire stages on one thread and the book stages on
+another, over a real lock-free SPSC ring — cache-line padded, with each side
+caching its view of the other so the steady-state hot path touches only lines it
+already owns. On paper it should win: the rate becomes the slower half (~73 ns)
+rather than the sum (~117 ns).
+
+| arrangement | ns/packet |
+|---|---|
+| single thread | ~117 |
+| two threads (SPSC split) | ~117 |
+
+**Indistinguishable, and the sign flips between runs** — successive measurements
+put threading 7% ahead and then 1% behind, both inside the run-to-run spread. The
+example refuses to name a winner unless the gap clears that spread, because a
+benchmark announcing a result it cannot resolve is worse than one that says it
+cannot.
+
+What the run *does* resolve is why: the producer blocks on a full queue ~4M times
+while the consumer starves ~9k times. The book side is saturated and the parse
+thread spends its life waiting, so the split relocates the bottleneck rather than
+removing it. Pipelining is arithmetic that works at millisecond granularity and
+stops working at nanosecond granularity.
+
+Both arrangements emit **identical book updates and identical orders**
+(2,398,061 and 2,065,378). Matching books alone would not be enough — the split
+moves the decision and encode stages to the other thread, so a reordering that
+reached the same final book while quoting off a different intermediate state
+would pass a book-only check.
+
 ### Coordinated omission, demonstrated rather than asserted
 
 Most latency benchmarks measure *service time* — how long an item took once work

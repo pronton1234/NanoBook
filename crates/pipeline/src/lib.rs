@@ -30,6 +30,21 @@
 //! pipeline — which is why the budget above avoids them entirely and why the
 //! replay driver reads the clock **once** per item rather than twice.
 //!
+//! ## Never benchmark two arrangements in blocks
+//!
+//! Machine load drifts over a multi-minute run, so timing all repetitions of A
+//! and then all repetitions of B hands that drift entirely to one of them.
+//! Taking the minimum does not save you: the minimum of five runs taken while
+//! the machine was busy is still worse than the minimum of five taken after it
+//! quietened down.
+//!
+//! This has now produced two wrong results in this crate. The stage budget saw
+//! a *negative* cost when drift accumulated along the stage order, and the
+//! threaded comparison reported the single-threaded path at 187 ns against the
+//! 110 ns the budget measures for the same code — a 70% gap that was the
+//! schedule, not the design. Both are fixed the same way: interleave the
+//! arrangements, one of each per repetition.
+//!
 //! ## Warm up, or measure the page fault instead
 //!
 //! Prefix timing has one trap, and it produced a *negative* stage cost the first
@@ -56,6 +71,7 @@
 
 pub mod hist;
 pub mod order;
+pub mod spsc;
 pub mod strategy;
 
 pub use hist::Histogram;
