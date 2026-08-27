@@ -11,3 +11,13 @@ book = { path = "../book" }
 deep = { path = "../deep" }
 iextp = { path = "../iextp" }
 thiserror = { workspace = true }
+
+# `loom` is a real cfg this crate uses, not a typo. Declaring it keeps
+# `unexpected_cfgs` quiet without weakening the lint everywhere else.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
+# Only pulled in when model checking, so the normal build and the normal
+# dependency tree are untouched.
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"

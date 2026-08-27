@@ -39,3 +39,21 @@ jobs:
       # the other, and CI runners are x86.
       - name: Report architecture
         run: uname -m
+
+  loom:
+    name: loom (exhaustive interleavings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+
+      # Passing on hardware shows the orderings held for the interleavings that
+      # happened to occur. `loom` enumerates the ones the memory model permits
+      # and checks each, so a bug needing a rare schedule is found
+      # deterministically rather than eventually.
+      - name: Model-check the SPSC queue
+        run: RUSTFLAGS="--cfg loom" cargo test -p pipeline --release loom
+        env:
+          LOOM_MAX_PREEMPTIONS: "3"

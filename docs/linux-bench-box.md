@@ -1,13 +1,71 @@
-# Provisioning the benchmark box
+# Provisioning a benchmark box — and why you probably should not
 
-Everything measured on the M2 so far carries the same caveat: macOS gives no CPU
-pinning, no CPU isolation, and no control over which cores a thread lands on. The
-consequences are visible in the numbers — the stage budget's per-stage split sits
-below its own noise floor, and the threaded comparison's run-to-run spread
-(167 ns) is larger than the whole pipeline it is measuring.
+**Read this first: the conclusion changed.**
 
-This is what to build so those numbers resolve, and what R2 (kernel bypass)
-needs.
+This document was written to specify a dedicated machine, on the premise that
+the per-stage latency budget could not be resolved without core isolation. Five
+of six stages fell under their own noise floor on the development laptop, and
+the diagnosis was that macOS gives no CPU pinning and the M2 mixes performance
+and efficiency cores.
+
+That diagnosis was wrong, or at least premature. **The dominant noise source was
+experimental design, not hardware.** Two changes fixed it:
+
+* a **shorter corpus** (60k segments rather than 2M packets), so a single
+  repetition finishes before machine load has time to drift; and
+* **round-robin repetitions** across stages rather than timing each stage in a
+  block, so any drift that remains is shared evenly instead of accumulating
+  along the stage order.
+
+With those, the free shared-CPU VM already serving the demo resolves five of six
+stages with spreads of 2.0–7.1 ns:
+
+```
+  stage                        cumulative   this stage   spread
+  receive (eth/vlan/ip/udp)       10.2 ns      10.2 ns    2.0 ns
+  sequence (IEX-TP, A/B)          19.0 ns       8.8 ns    2.0 ns
+  parse (DEEP)                    45.7 ns      26.7 ns    4.4 ns
+  book update                    125.1 ns      79.4 ns    7.1 ns
+  decide (strategy)              130.4 ns       5.2 ns    3.1 ns
+  encode (OUCH order)            143.3 ns      13.0 ns   20.7 ns  <- unresolved
+```
+
+Live at `/budget` on the deployed host. **A dedicated machine is not required for
+this, and renting one monthly would have been paying to avoid fixing a
+methodology problem.**
+
+## What a rented box would still buy
+
+Three things, none of which justify a monthly commitment:
+
+1. **`perf`.** macOS has no equivalent. Cache-miss counters would confirm or
+   refute the inference about why the arena container lost, which is currently
+   reasoning rather than measurement.
+2. **AF_XDP (R2).** Kernel bypass genuinely needs Linux, a recent kernel, and
+   control of boot parameters.
+3. **The last stage.** `encode` is still unresolved at 13.0 ns against a 20.7 ns
+   spread; real core isolation would settle it.
+
+## If you do want one: rent it by the hour, not the month
+
+A benchmark is a measurement, not a service. Take the numbers, commit them,
+destroy the machine.
+
+| option | cost for one session | gives you |
+|---|---|---|
+| **Fly `performance-2x`**, scaled up temporarily | pennies — billed per second | dedicated vCPU on infrastructure already set up |
+| **Hetzner CCX13** (dedicated vCPU, hourly) | ~€0.30 for five hours | dedicated cores, full root, kernel boot params |
+| **AWS `c6i.metal`** | ~$11 for two hours | true bare metal, full isolation, `perf` |
+
+Scaling the existing Fly machine is the cheapest first move by a wide margin,
+because the deployment already exists:
+
+```bash
+flyctl scale vm performance-2x --app latency-ladder   # run the benchmarks
+flyctl scale vm shared-cpu-1x  --app latency-ladder   # scale back down
+```
+
+**Do not rent anything monthly for this.** The measurements are one-off.
 
 ## What the box has to provide
 
@@ -129,13 +187,14 @@ taskset -c 2,3 cargo run --release --example threaded -- data/raw/<file>.pcap
 weakly-ordered machine, and x86 is where a *missing* barrier would pass silently,
 so agreement between the two is worth confirming rather than assuming.
 
-## What to re-measure once it exists
+## What to re-measure if you do rent one
 
-1. **The stage budget.** Five of six stage costs currently sit below the noise
-   floor and are not quotable.
-2. **The threaded comparison.** Currently indistinguishable with a 167 ns spread;
-   on pinned cores the split should resolve one way or the other.
+1. ~~The stage budget.~~ **Resolved without one** — see the top of this file.
+2. **The threaded comparison.** Still indistinguishable, with a 167 ns spread.
+   The same shorter-corpus and round-robin fixes should be tried there first,
+   before assuming hardware is the answer; that assumption was wrong once here
+   already.
 3. **The container bake-off.** `perf stat` can confirm or refute the cache-miss
    explanation for why the arena lost, which is presently an inference.
-4. **ARM vs x86.** Same binary, same capture, both architectures — the comparison
-   is itself a result.
+4. ~~ARM vs x86.~~ **Already covered**: the M2 develops it, CI runs it on x86,
+   and the deployed host measures it on x86.

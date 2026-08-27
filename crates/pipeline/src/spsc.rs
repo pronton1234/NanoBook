@@ -32,15 +32,81 @@
 //! actually permits the reordering, so an ordering bug has somewhere to show up
 //! rather than lying dormant until it reaches different silicon.
 //!
-//! Exhaustive interleaving validation under `loom` is B7 and not done here; what
-//! this file claims is a correct-by-construction Release/Acquire pairing and
-//! tests that pass on a weakly-ordered machine, which is a weaker claim than a
-//! model checker and is stated as such.
+//! ## Exhaustive checking
+//!
+//! Passing on ARM is evidence, not proof — it says the orderings held for the
+//! interleavings that happened to occur, across however many runs the test made.
+//! `loom` is different in kind: it enumerates the interleavings the memory model
+//! permits and checks the invariants under each, so a bug that needs a rare
+//! schedule is found deterministically rather than eventually.
+//!
+//! Run with:
+//!
+//! ```text
+//! RUSTFLAGS="--cfg loom" cargo test -p pipeline --release loom
+//! ```
+//!
+//! The queue is deliberately tiny under `loom` (two slots, three items). The
+//! state space grows explosively with both, and a model check that does not
+//! terminate proves nothing.
 
-use std::cell::{Cell, UnsafeCell};
+/// Atomics, `Arc` and interior mutability come from `loom` when model checking
+/// and from `std` otherwise. `loom` cannot see through `std` primitives, so a
+/// queue built on them would be checked as an opaque box.
+mod sync {
+    #[cfg(loom)]
+    pub use loom::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(loom)]
+    pub use loom::sync::Arc;
+    #[cfg(not(loom))]
+    pub use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(not(loom))]
+    pub use std::sync::Arc;
+
+    /// A slot, with the one API `loom`'s `UnsafeCell` and `std`'s can share.
+    ///
+    /// `loom` tracks every access to detect a data race, which is why its
+    /// `UnsafeCell` uses closures rather than handing out a raw pointer. The
+    /// `std` version below adopts the same shape so the queue's body is
+    /// identical under both.
+    #[cfg(loom)]
+    #[derive(Debug)]
+    pub struct Slot<T>(loom::cell::UnsafeCell<T>);
+
+    #[cfg(not(loom))]
+    #[derive(Debug)]
+    pub struct Slot<T>(std::cell::UnsafeCell<T>);
+
+    impl<T> Slot<T> {
+        pub fn new(v: T) -> Self {
+            #[cfg(loom)]
+            {
+                Slot(loom::cell::UnsafeCell::new(v))
+            }
+            #[cfg(not(loom))]
+            {
+                Slot(std::cell::UnsafeCell::new(v))
+            }
+        }
+
+        /// # Safety
+        /// The caller must guarantee no other access to this slot overlaps.
+        pub unsafe fn with_mut<R>(&self, f: impl FnOnce(*mut T) -> R) -> R {
+            #[cfg(loom)]
+            {
+                self.0.with_mut(|p| f(p))
+            }
+            #[cfg(not(loom))]
+            {
+                f(self.0.get())
+            }
+        }
+    }
+}
+
+use std::cell::Cell;
 use std::mem::MaybeUninit;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use sync::{Arc, AtomicUsize, Ordering, Slot};
 
 /// Padding to a typical cache line so two fields cannot share one.
 #[repr(align(128))]
@@ -48,7 +114,7 @@ struct Padded<T>(T);
 
 struct Inner<T> {
     /// Capacity is a power of two so wrapping is a mask, not a modulo.
-    buf: Box<[UnsafeCell<MaybeUninit<T>>]>,
+    buf: Box<[Slot<MaybeUninit<T>>]>,
     mask: usize,
     /// Next slot to write. Producer-owned.
     tail: Padded<AtomicUsize>,
@@ -84,7 +150,7 @@ pub fn channel<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
     let cap = capacity.next_power_of_two();
     let mut buf = Vec::with_capacity(cap);
     for _ in 0..cap {
-        buf.push(UnsafeCell::new(MaybeUninit::uninit()));
+        buf.push(Slot::new(MaybeUninit::uninit()));
     }
     let inner = Arc::new(Inner {
         buf: buf.into_boxed_slice(),
@@ -125,7 +191,7 @@ impl<T> Producer<T> {
         // SAFETY: slot `tail & mask` is outside [head, tail), so the consumer
         // will not read it until `tail` is published below.
         unsafe {
-            (*self.inner.buf[tail & self.inner.mask].get()).write(value);
+            self.inner.buf[tail & self.inner.mask].with_mut(|p| (*p).write(value));
         }
         // Release: the slot write above must be visible to any thread that
         // observes this new tail. Relaxed here would still pass on x86 and is
@@ -151,7 +217,8 @@ impl<T> Consumer<T> {
 
         // SAFETY: `head < tail` was established above, so this slot was written
         // and published by the producer and has not been read yet.
-        let value = unsafe { (*self.inner.buf[head & self.inner.mask].get()).assume_init_read() };
+        let value =
+            unsafe { self.inner.buf[head & self.inner.mask].with_mut(|p| (*p).assume_init_read()) };
         self.inner
             .head
             .0
@@ -184,14 +251,71 @@ impl<T> Drop for Inner<T> {
         while i != tail {
             // SAFETY: [head, tail) is exactly the initialised range.
             unsafe {
-                (*self.buf[i & self.mask].get()).assume_init_drop();
+                self.buf[i & self.mask].with_mut(|p| (*p).assume_init_drop());
             }
             i = i.wrapping_add(1);
         }
     }
 }
 
-#[cfg(test)]
+/// Exhaustive interleaving checks. Only built under `--cfg loom`.
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::*;
+
+    /// Every item crosses exactly once and in order, under every interleaving
+    /// `loom` can construct.
+    ///
+    /// Two slots and three items is deliberately minimal: the state space grows
+    /// explosively in both, and a model check that does not finish proves
+    /// nothing. Three items over two slots still forces the queue to wrap and
+    /// to hit the full-and-empty boundaries, which is where the orderings
+    /// matter.
+    #[test]
+    fn transfer_is_correct_under_every_interleaving() {
+        loom::model(|| {
+            let (p, c) = channel::<usize>(2);
+
+            let producer = loom::thread::spawn(move || {
+                for i in 0..3 {
+                    while p.push(i).is_err() {
+                        loom::thread::yield_now();
+                    }
+                }
+            });
+
+            let mut got = Vec::new();
+            while got.len() < 3 {
+                match c.pop() {
+                    Some(v) => got.push(v),
+                    None => loom::thread::yield_now(),
+                }
+            }
+            producer.join().unwrap();
+            assert_eq!(got, vec![0, 1, 2], "order must hold under every schedule");
+        });
+    }
+
+    /// A consumer that runs ahead must observe emptiness, never a torn or stale
+    /// slot. This is the check that a `Relaxed` publish would fail: the index
+    /// could become visible before the value written into the slot.
+    #[test]
+    fn a_pop_never_observes_an_unpublished_slot() {
+        loom::model(|| {
+            let (p, c) = channel::<usize>(2);
+            let producer = loom::thread::spawn(move || {
+                p.push(42).unwrap();
+            });
+            // Racing the producer: either nothing yet, or exactly what was sent.
+            if let Some(v) = c.pop() {
+                assert_eq!(v, 42, "a visible index implies a visible value");
+            }
+            producer.join().unwrap();
+        });
+    }
+}
+
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
