@@ -122,6 +122,19 @@ impl<L: Levels> SymbolBook<L> {
     }
 }
 
+/// The touch after an update, returned by [`Book::apply_price_level`].
+///
+/// The update already had to read both sides to check whether the book crossed.
+/// Handing that back costs nothing and saves the caller a second hash lookup
+/// plus two more reads of level storage -- on 97% of feed traffic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Touch {
+    pub bid: Option<(Price, u32)>,
+    pub ask: Option<(Price, u32)>,
+    /// The feed is not partway through a multi-message book event.
+    pub stable: bool,
+}
+
 /// Counters the audit reports. All derived, never authoritative.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
@@ -237,7 +250,9 @@ impl<L: Levels> Book<L> {
     #[inline]
     pub fn apply(&mut self, msg: &Message<'_>) {
         match msg {
-            Message::PriceLevel(u) => self.apply_price_level(u),
+            Message::PriceLevel(u) => {
+                self.apply_price_level(u);
+            }
             // A trade break cancels a previously published trade, so it must
             // not add to the traded total.
             Message::Trade(t) if !t.is_break => {
@@ -249,8 +264,12 @@ impl<L: Levels> Book<L> {
     }
 
     /// The hot path: 97% of all feed traffic reaches here.
+    ///
+    /// Returns the resulting touch. The crossed-book check below has to read
+    /// both sides anyway, so returning them turns the caller's follow-up lookup
+    /// into free information.
     #[inline]
-    pub fn apply_price_level(&mut self, u: &PriceLevelUpdate) {
+    pub fn apply_price_level(&mut self, u: &PriceLevelUpdate) -> Touch {
         let entry = self.symbols.entry(u.symbol).or_default();
         self.stats.updates += 1;
         if u.size == 0 {
@@ -284,19 +303,21 @@ impl<L: Levels> Book<L> {
         // storage, so the invariant check's memory traffic was silently
         // attributed to the container being measured.
         let (bid, ask) = (entry.best_bid(), entry.best_ask());
+        let stable = entry.complete;
         if let (Some((b, _)), Some((a, _))) = (bid, ask) {
             match b.cmp(&a) {
                 Ordering::Greater => {
-                    if entry.complete {
+                    if stable {
                         self.stats.crossed_when_stable += 1;
                     } else {
                         self.stats.crossed_mid_event += 1;
                     }
                 }
-                Ordering::Equal if entry.complete => self.stats.locked_when_stable += 1,
+                Ordering::Equal if stable => self.stats.locked_when_stable += 1,
                 _ => {}
             }
         }
+        Touch { bid, ask, stable }
     }
 
     /// Forget everything. The feed's session id changed, so any retained state

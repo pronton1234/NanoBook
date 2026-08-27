@@ -135,6 +135,10 @@ pub struct Pipeline<L: Levels> {
     pub strategy: Strategy,
     tokens: TokenGen,
     out: [u8; ENTER_ORDER_LEN],
+    /// When set, `decide` re-looks-up the symbol instead of using the touch the
+    /// update returned. Exists only so the optimisation log can measure the two
+    /// against each other; production leaves it false.
+    pub redundant_lookup: bool,
     pub counters: Counters,
 }
 
@@ -153,6 +157,7 @@ impl<L: Levels> Pipeline<L> {
             strategy: Strategy::default(),
             tokens: TokenGen::default(),
             out: [0u8; ENTER_ORDER_LEN],
+            redundant_lookup: false,
             counters: Counters::default(),
         }
     }
@@ -205,27 +210,88 @@ impl<L: Levels> Pipeline<L> {
                 self.book.apply(&msg);
                 continue;
             };
-            self.book.apply_price_level(&u);
+            let touch = self.book.apply_price_level(&u);
             self.counters.book_updates += 1;
             if upto == Stage::BookUpdate {
                 continue;
             }
 
-            // The book has just read both touches for its crossed check; ask it
-            // once more here rather than threading them out, and note that this
-            // is the one place the budget charges a re-read to `decide`.
-            let Some(sb) = self.book.get(u.symbol) else {
-                continue;
+            // The touch comes back from the update, which already had to read
+            // both sides. `decide` therefore performs no lookup of its own.
+            let quote = if self.redundant_lookup {
+                // The version this replaced, kept so the two can be measured
+                // interleaved in one process rather than compared across runs.
+                let Some(sb) = self.book.get(u.symbol) else {
+                    continue;
+                };
+                self.strategy.on_touch(
+                    u.symbol,
+                    book::Touch {
+                        bid: sb.best_bid(),
+                        ask: sb.best_ask(),
+                        stable: sb.is_stable(),
+                    },
+                )
+            } else {
+                self.strategy.on_touch(u.symbol, touch)
             };
-            let quote = self
-                .strategy
-                .on_book(u.symbol, sb, sb.best_bid(), sb.best_ask());
             if upto == Stage::Decide {
                 std::hint::black_box(&quote);
                 continue;
             }
 
             let Some(q) = quote else { continue };
+            self.counters.quotes += 1;
+            let o = NewOrder {
+                token: self.tokens.next_token(),
+                side: q.side,
+                shares: q.shares,
+                symbol: q.symbol,
+                price: q.price,
+            };
+            match encode_enter_order(&o, &mut self.out) {
+                Ok(_) => self.counters.orders_encoded += 1,
+                Err(_) => self.counters.encode_errors += 1,
+            }
+            std::hint::black_box(&self.out);
+        }
+    }
+}
+
+impl<L: Levels> Pipeline<L> {
+    /// The production path: no `Stage` parameter, so no prefix branches.
+    ///
+    /// `on_frame` carries five `upto == Stage::_` comparisons so the budget can
+    /// time cumulative prefixes. They are perfectly predictable — the value is
+    /// constant for a whole run — so the expectation is that removing them
+    /// changes nothing measurable. That expectation is worth testing rather than
+    /// assuming, which is what the optimisation log is for.
+    #[inline]
+    pub fn on_frame_fast(&mut self, bytes: &[u8]) {
+        self.counters.packets += 1;
+        let Ok(dg) = frame::parse(bytes) else { return };
+        let Ok(seg) = Segment::parse(dg.payload) else {
+            return;
+        };
+        if !matches!(
+            self.seq
+                .observe(seg.session, seg.first_sequence, seg.message_count),
+            Action::Deliver | Action::SessionReset
+        ) {
+            return;
+        }
+        for body in seg.messages() {
+            let Ok(msg) = deep::parse(body) else { continue };
+            self.counters.messages += 1;
+            let Message::PriceLevel(u) = msg else {
+                self.book.apply(&msg);
+                continue;
+            };
+            let touch = self.book.apply_price_level(&u);
+            self.counters.book_updates += 1;
+            let Some(q) = self.strategy.on_touch(u.symbol, touch) else {
+                continue;
+            };
             self.counters.quotes += 1;
             let o = NewOrder {
                 token: self.tokens.next_token(),

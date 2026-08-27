@@ -14,7 +14,7 @@
 //! free**, because an unpredictable decision stage would show up as jitter in
 //! the p99.9 and be indistinguishable from jitter in the parts under study.
 
-use book::{Levels, SymbolBook};
+use book::Touch;
 use deep::{Price, Side, Symbol};
 
 /// A decision. `None` far more often than not.
@@ -55,25 +55,19 @@ impl Strategy {
         Self { params }
     }
 
-    /// Decide whether to quote, given one symbol's book.
+    /// Decide whether to quote, from the touch the book just produced.
     ///
-    /// Takes the touch as arguments rather than re-reading it: the caller has
-    /// just computed both sides for its own invariant check, and reading them
-    /// again would repeat the exact mistake this project already fixed once in
-    /// the book's crossed-book test.
+    /// Takes a [`Touch`] rather than the book, so the decision stage performs no
+    /// lookup of its own. The update already read both sides for its crossed
+    /// check; asking the book again would be a second hash probe and two more
+    /// reads of level storage on every message.
     #[inline]
-    pub fn on_book<L: Levels>(
-        &self,
-        symbol: Symbol,
-        sb: &SymbolBook<L>,
-        bid: Option<(Price, u32)>,
-        ask: Option<(Price, u32)>,
-    ) -> Option<Quote> {
-        if !sb.is_stable() {
+    pub fn on_touch(&self, symbol: Symbol, t: Touch) -> Option<Quote> {
+        if !t.stable {
             return None;
         }
-        let (b, _) = bid?;
-        let (a, _) = ask?;
+        let (b, _) = t.bid?;
+        let (a, _) = t.ask?;
         let spread = a.raw() - b.raw();
         if spread < self.params.min_spread {
             return None;
@@ -115,7 +109,14 @@ mod tests {
     fn decide(b: &Book<BTreeLevels>, s: &Strategy) -> Option<Quote> {
         let sym = Symbol::from_ticker("AAPL");
         let sb = b.get(sym)?;
-        s.on_book(sym, sb, sb.best_bid(), sb.best_ask())
+        s.on_touch(
+            sym,
+            book::Touch {
+                bid: sb.best_bid(),
+                ask: sb.best_ask(),
+                stable: sb.is_stable(),
+            },
+        )
     }
 
     #[test]

@@ -85,6 +85,40 @@ moves the decision and encode stages to the other thread, so a reordering that
 reached the same final book while quoting off a different intermediate state
 would pass a book-only check.
 
+### The optimisation log
+
+One change at a time, all variants interleaved in one process, each reporting its
+own run-to-run spread. A change smaller than that spread is printed as
+**unresolved**, never as a win.
+
+| variant | ns/packet | spread | vs baseline |
+|---|---|---|---|
+| baseline | 115.4 | 178 ns | — |
+| + touch threading | 109.4 | 102 ns | −6.1 ns, unresolved |
+| + no `Stage` branches | 104.0 | 90 ns | −9.2 ns, unresolved |
+
+All three produce identical book updates and identical orders, so no variant is
+faster by computing something different.
+
+**Both changes are unresolved by the clock on this machine**, and the spread is
+the reason: it exceeds the whole pipeline. The direction is consistent across
+runs and matches the predicted magnitude, but consistent-and-plausible is not
+measured, and the log says so.
+
+So when the clock cannot resolve a change, **count the work instead** — an
+operation count has no noise and is identical on any hardware:
+
+```
+hash probes:  baseline 4,796,122   optimised 2,398,061   2,398,061 fewer
+level reads:  baseline 9,592,244   optimised 4,796,122   4,796,122 fewer
+```
+
+Every update used to probe the symbol map twice — once to apply, once for the
+decision — and read `best_bid`/`best_ask` twice. The update had already computed
+both for its crossed-book check and was throwing them away, so the second set was
+pure duplication on 97% of all feed traffic. Returning the touch from the update
+removes it exactly, whatever the clock says.
+
 ### Coordinated omission, demonstrated rather than asserted
 
 Most latency benchmarks measure *service time* — how long an item took once work

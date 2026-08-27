@@ -133,12 +133,10 @@ fn main() {
                 loop {
                     match cons.pop() {
                         Some(u) => {
-                            bk.apply_price_level(&u);
+                            let touch = bk.apply_price_level(&u);
                             n += 1;
-                            if let Some(sb) = bk.get(u.symbol) {
-                                if let Some(q) =
-                                    strat.on_book(u.symbol, sb, sb.best_bid(), sb.best_ask())
-                                {
+                            {
+                                if let Some(q) = strat.on_touch(u.symbol, touch) {
                                     let o = pipeline::NewOrder {
                                         token: tokens.next_token(),
                                         side: q.side,
