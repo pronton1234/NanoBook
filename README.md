@@ -1,46 +1,106 @@
 # Latency Ladder
 
-**A tick-to-trade market data pipeline in Rust — wire bytes in, order bytes out.**
+**The piece of a trading system that turns raw exchange network traffic into a
+correct picture of the market in ~110 nanoseconds — including the messy parts
+most projects skip.**
 
 [![CI](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml/badge.svg)](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml)
 
 ### ▶ [Run it live](https://pronton1234.github.io/LatencyLadder/)
 
-Perturb the feed — offered load, packet loss, A/B duplication, level container —
-and the **real native pipeline** runs server-side and reports what happened.
-Nothing is simulated in the browser.
+---
+
+## What problem this solves
+
+An exchange keeps a list of everyone who wants to buy and sell, at what price, in
+what size. That list is the **order book**, and it changes thousands of times a
+second.
+
+To trade, you need to know what that book looks like *right now*. So the exchange
+broadcasts every change as a stream of network packets, and your job is:
+
+```
+packets arrive  →  rebuild the book  →  decide  →  send an order
+```
+
+That is the whole loop. It is harder than it sounds for three reasons.
+
+**Everyone gets the same packets at the same time.** The exchange tells you
+nothing it is not telling everyone else, simultaneously. The only edge available
+is who finishes processing first. If a competitor rebuilds the book in 100
+nanoseconds and you take 200, they act on information you are still parsing.
+
+**The network lies to you.** These packets are sent by UDP, which makes no
+promises. They get lost, arrive out of order, or arrive twice — exchanges send
+everything twice down separate physical paths precisely because they expect it.
+You have to notice a gap, take whichever copy arrives first, discard the
+duplicate, and never drop a message, in nanoseconds.
+
+**Nothing tells you when you are wrong.** There is no correct answer to check
+against. If your book is wrong it still looks like a book. You simply start
+trading against a market that does not exist.
+
+## What this is
+
+The machine that turns packets into a correct book, quickly, and **proves both
+halves of that claim**.
 
 | | |
 |---|---|
-| tick-to-trade, single thread | **110.4 ns/packet**, 88.5 ns/message |
-| real IEX messages decoded, zero errors | **40,223,554** |
-| crossed books at an event boundary | **0** |
+| packet in to order encoded | **110.4 ns** |
+| real exchange messages decoded, zero errors | **40,223,554** |
+| corrupted books, across 38,993,905 updates | **0** |
 | measurement bugs caught before publication | **8** |
-| external dependencies | **1** Rust crate (`thiserror`), **0** C++ |
 | languages | Rust · C++20 · Python |
+| tests | 109 Rust + 158 C++ + 11 Python |
+| external dependencies | **1** |
 
 ```
-receive    strip Ethernet / 802.1Q VLAN / IPv4 / UDP
-sequence   IEX-TP segments · gap detection · retransmit · A/B arbitration
-parse      DEEP binary decode, fixed-width, zero allocation
-book       aggregated-depth order book, sorted structure-of-arrays
-decide     strategy hook (deliberately trivial - a placeholder in the budget)
-encode     OUCH-style Enter Order
+receive    strip Ethernet / VLAN / IPv4 / UDP
+sequence   detect gaps, request retransmits, pick the first of two feeds
+parse      decode the exchange's binary format
+book       rebuild who wants to buy and sell at what price
+decide     a deliberately trivial placeholder, so it occupies its real cost
+encode     write an order back onto the wire
 ```
 
-Most order-book projects open a file of already-de-framed messages and start
-parsing. That skips everything the transport actually does: market data arrives
-as UDP multicast, published twice down physically separate paths, with packets
-reordered and dropped, and a receiver has to reconcile all of that before a
-single book update is correct.
+## Why it is worth looking at
 
-**The measurement discipline is the point, not the throughput figure.** Eight
-benchmarking bugs are documented below, and none of them crashed — every one
-produced a plausible number. A negative stage cost. A fake 1.38x threading
-speedup. A histogram reporting its own bucket count as a p99. An audit that
-returned "zero crossed books" because it inspected the book after the market
-closed. Those are in the repository because catching them is the skill the
-project is actually about.
+### The part everyone skips
+
+Almost every "I built an order book" project opens a *file* of clean, ordered
+messages and parses it — the easy version, with the network's misbehaviour
+deleted. This handles the wire.
+
+Building it exposed two bugs that were invisible on clean data and would have
+been fatal in production: under 2% packet loss, the pipeline was silently
+dropping **73% of messages**. It looked completely healthy right up until it
+wasn't.
+
+### Not trusting your own instruments
+
+Anyone can build a scale. The hard part is knowing your scale is accurate,
+because if it isn't, every measurement is wrong and **the numbers still look
+fine**.
+
+Eight times here, the code ran, produced a number, and the number was wrong in a
+way that looked entirely reasonable:
+
+| what it reported | what was actually happening |
+|---|---|
+| a stage taking **negative time** (−239 ns) | the first pass was paying page-fault costs. Caught *only* because negative time is impossible — an inflated but positive number would have shipped as a finding |
+| a **38% speedup** from threading | the laptop was busier during one test than the other |
+| **"zero corrupted books"** | the check ran after the market closed, when the book was empty. It measured nothing, cleanly |
+| a **p99 of 512** | that was the histogram's own internal bucket count |
+
+Every one of those is a number you would have put on a résumé.
+
+That is the skill the project is actually about. In trading, a backtest saying
+you will make money is worthless if the measurement is broken, and firms lose
+real money to exactly this. Two failed experiments are kept in the tree with the
+measurements that killed them, rather than quietly deleted.
+
+---
 
 ## Three languages, each where it belongs
 
