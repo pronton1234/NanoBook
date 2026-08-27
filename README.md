@@ -44,28 +44,54 @@ mean — the slow runs measure the machine's background noise, not the code):
 
 | container | ns/update | vs R0 | container's share |
 |---|---|---|---|
-| *floor: no container at all* | *13.2* | — | — |
-| `BTreeMap` (R0) | 61.7 | 1.00x | 48.5 ns (79%) |
-| **sorted SoA (R1)** | **52.3** | **1.18x** | 39.1 ns (75%) |
-| inline SoA (R1b) | 54.3 | 1.14x | 41.1 ns (76%) |
+| *floor: no container at all* | *12.4* | — | — |
+| `BTreeMap` (R0) | 59.6 | 1.00x | 47.2 ns (79%) |
+| **sorted SoA (R1)** | **49.6** | **1.20x** | 37.2 ns (75%) |
+| inline SoA (R1b) | 51.9 | 1.15x | 39.5 ns (76%) |
+| arena (R1c) | 103.9 | 0.57x | 91.5 ns (88%) |
 
-All three produce byte-identical books, so no container is fast by being wrong.
+All four produce byte-identical books, so nothing is fast by being wrong.
 
-Two hypotheses about where the time went, both **falsified by measurement**:
+**The simplest structure won, and three attempts to beat it failed.** Each is
+kept in the tree as evidence rather than deleted:
 
-1. *"The symbol hash lookup dominates."* It does not — the whole book path
-   without any container is 13.2 ns, a fifth of the total.
-2. *"Inlining the levels will remove a cache miss and win."* It lost. Storing 8
-   levels in the struct grew `SymbolBook` from ~112 to ~208 bytes, roughly
-   doubling the hash table's backing array to ~1.27MB, and the table's own cache
-   pressure cost more than the indirection it removed.
+1. *"The symbol hash lookup dominates."* No — the whole book path with no
+   container at all is 12.4 ns, a fifth of the total.
+2. *"Inlining the levels removes a cache miss."* It lost. Storing 8 levels in the
+   struct grew `SymbolBook` from ~112 to ~208 bytes, doubling the hash table's
+   backing array to ~1.27MB. The table's own misses cost more than the
+   indirection removed.
+3. *"An arena makes level storage contiguous."* It lost by **2x**, worse even than
+   the `BTreeMap` baseline. Sweeping the slot size separates the two causes:
 
-The container is 75–79% of the update either way, and 39 ns for a scan over two
-elements is still far too slow to be the scan. The remaining suspect is that
-every symbol's levels are a separately-allocated `Vec`, scattered across the
-heap — which points at arena-allocating level storage contiguously and keeping
-only an index in the `SymbolBook`. Not yet built, not yet measured, so not yet
-claimed.
+   | SLOT | ns/update |
+   |---|---|
+   | 2 | 79.5 |
+   | 4 | 70.2 |
+   | 8 | 103.9 |
+
+   Footprint is part of it — eight slots to hold a median of two levels is ~75%
+   padding, inflating ~400KB of live data into a ~2.3MB working set — and halving
+   the slot recovers a third. Halving again does not, because at p50 = 2 a
+   two-slot arena spills constantly.
+
+   But even at its best the arena is 42% slower than a plain sorted `Vec`, so
+   footprint is not the whole story. The rest is that it **de-localised what the
+   `HashMap` had already co-located**: one hash entry holds both sides' `Vec`
+   headers and the event-complete flag in a single 64-byte line, whereas the
+   arena spreads a symbol across four independently-indexed arrays.
+
+   *Contiguity is not locality.* A flat array is contiguous in the abstract; what
+   a cache rewards is the fields used together sharing a line. A `HashMap` entry
+   is already an arena of one record, and it had that property for free.
+
+One real bug fell out of the investigation: `is_crossed()` and `is_locked()` each
+called `best_bid()` and `best_ask()`, so asking both questions did up to four
+reads of level data where two suffice — on 97% of feed traffic. Worse, it
+corrupted the decomposition itself, because the no-container floor used a `max()`
+that returns `None` without touching storage, so the invariant check's memory
+traffic was being charged to whichever container was under test. Fixed; worth
+1.8 ns.
 
 The interesting part is not the throughput figure. It is *what dominates* at
 each rung — allocation, then cache misses, then the kernel network stack — and

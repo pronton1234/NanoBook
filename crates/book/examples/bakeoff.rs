@@ -23,7 +23,7 @@
 
 use std::time::Instant;
 
-use book::{BTreeLevels, Book, InlineLevels, Levels, SortedLevels};
+use book::{ArenaBook, BTreeLevels, Book, InlineLevels, Levels, SortedLevels};
 use deep::{Message, PriceLevelUpdate};
 use iextp::{capture::Capture, frame, segment::Segment, sequencer::Sequencer};
 
@@ -146,6 +146,8 @@ fn main() {
     report("sorted SoA (R1)", sorted, n, Some(btree.0));
     let inline = run::<InlineLevels>(&updates, symbols);
     report("inline SoA (R1b)", inline, n, Some(btree.0));
+    let arena = run_arena(&updates, symbols);
+    report("arena (R1c)", arena, n, Some(btree.0));
 
     // ---- where does the time actually go? ----
     //
@@ -163,6 +165,7 @@ fn main() {
         ("BTreeMap", btree.0),
         ("sorted SoA", sorted.0),
         ("inline SoA", inline.0),
+        ("arena", arena.0),
     ] {
         let total = t as f64 / n as f64;
         println!(
@@ -181,17 +184,43 @@ fn main() {
     let a = final_state::<BTreeLevels>(&updates, symbols);
     let b = final_state::<SortedLevels>(&updates, symbols);
     let c = final_state::<InlineLevels>(&updates, symbols);
+    let d = {
+        let mut b = ArenaBook::with_capacity(symbols * 2);
+        for u in &updates {
+            b.apply_price_level(u);
+        }
+        (b.total_levels(), b.total_size())
+    };
     println!("    BTreeMap    levels {:>8}  total size {:>14}", a.0, a.1);
     println!("    sorted SoA  levels {:>8}  total size {:>14}", b.0, b.1);
     println!("    inline SoA  levels {:>8}  total size {:>14}", c.0, c.1);
+    println!("    arena       levels {:>8}  total size {:>14}", d.0, d.1);
     println!(
         "    {}",
-        if a == b && b == c {
-            "all three identical"
+        if a == b && b == c && c == d {
+            "all four identical"
         } else {
             "<-- MISMATCH: a fast container is wrong"
         }
     );
+}
+
+/// The arena book is a different architecture, not a different container, so it
+/// does not go through `Book<L>` and needs its own driver.
+fn run_arena(updates: &[PriceLevelUpdate], symbols: usize) -> (u128, usize) {
+    let mut best = u128::MAX;
+    let mut levels = 0;
+    for _ in 0..RUNS {
+        let mut b = ArenaBook::with_capacity(symbols * 2);
+        let start = Instant::now();
+        for u in updates {
+            b.apply_price_level(u);
+        }
+        let e = start.elapsed().as_nanos();
+        levels = b.total_levels();
+        best = best.min(e);
+    }
+    (best, levels)
 }
 
 /// Returns (best nanos, levels held at the end).
@@ -210,38 +239,6 @@ fn run<L: Levels>(updates: &[PriceLevelUpdate], symbols: usize) -> (u128, usize)
         best = best.min(e);
     }
     (best, levels)
-}
-
-/// Time only the per-update symbol lookup, with no book work at all.
-///
-/// ~6,000 symbols touched in feed order is a scattered access pattern over a
-/// table far larger than L1, so this is expected to be dominated by cache
-/// misses rather than by hashing arithmetic.
-fn time_lookup_only(updates: &[PriceLevelUpdate], symbols: usize) -> u128 {
-    let mut b: Book<SortedLevels> = Book::with_capacity(symbols * 2);
-    // Populate first, so the lookups hit rather than insert.
-    for u in updates {
-        b.apply_price_level(u);
-    }
-    let mut best = u128::MAX;
-    for _ in 0..RUNS {
-        let mut sink = 0usize;
-        let start = Instant::now();
-        for u in updates {
-            // `len()` would be a misleading probe: it reads a field stored
-            // inline in the container and never dereferences the heap, so it
-            // would attribute the level data's cache misses to nobody. `max()`
-            // touches the actual level storage, which is what the hot path does.
-            sink += b
-                .get(u.symbol)
-                .and_then(|sb| sb.bids.max())
-                .map_or(0, |(p, _)| p.raw() as usize);
-        }
-        let e = start.elapsed().as_nanos();
-        std::hint::black_box(sink);
-        best = best.min(e);
-    }
-    best
 }
 
 fn final_state<L: Levels>(updates: &[PriceLevelUpdate], symbols: usize) -> (usize, u64) {

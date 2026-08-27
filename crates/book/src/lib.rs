@@ -24,17 +24,20 @@
 //! every message would read as mid-event and this check would silently never
 //! run.
 
+pub mod arena;
 pub mod btree;
 pub mod inline;
 pub mod levels;
 pub mod sorted;
 
+pub use arena::ArenaBook;
 pub use btree::BTreeLevels;
 pub use inline::InlineLevels;
 pub use levels::Levels;
 pub use sorted::SortedLevels;
 
 use deep::{Message, Price, PriceLevelUpdate, Side, Symbol};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -268,14 +271,31 @@ impl<L: Levels> Book<L> {
             entry.apply(u);
         }
 
-        if entry.is_crossed() {
-            if entry.is_stable() {
-                self.stats.crossed_when_stable += 1;
-            } else {
-                self.stats.crossed_mid_event += 1;
+        // Read the touch ONCE.
+        //
+        // `is_crossed()` and `is_locked()` each call `best_bid()` and
+        // `best_ask()`, so asking both questions meant up to four reads of
+        // level data per update where two answer them. Every one of those is a
+        // dependent load into a separately-allocated level array, and at 97% of
+        // feed traffic the waste is not marginal.
+        //
+        // This also invalidated the bake-off's decomposition: the "no
+        // container" floor used a `max()` that returns `None` without touching
+        // storage, so the invariant check's memory traffic was silently
+        // attributed to the container being measured.
+        let (bid, ask) = (entry.best_bid(), entry.best_ask());
+        if let (Some((b, _)), Some((a, _))) = (bid, ask) {
+            match b.cmp(&a) {
+                Ordering::Greater => {
+                    if entry.complete {
+                        self.stats.crossed_when_stable += 1;
+                    } else {
+                        self.stats.crossed_mid_event += 1;
+                    }
+                }
+                Ordering::Equal if entry.complete => self.stats.locked_when_stable += 1,
+                _ => {}
             }
-        } else if entry.is_stable() && entry.is_locked() {
-            self.stats.locked_when_stable += 1;
         }
     }
 
