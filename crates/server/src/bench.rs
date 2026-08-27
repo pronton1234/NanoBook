@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use book::{BTreeLevels, Levels, SortedLevels};
 use deep::Symbol;
-use pipeline::{Histogram, Pipeline};
+use pipeline::{Histogram, Pipeline, Stage};
 
 /// Which level container to run. The bake-off, exposed as a knob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +216,76 @@ fn run_with<L: Levels>(req: Request, corpus: &Corpus) -> Report {
         behind_schedule: behind,
         top,
     }
+}
+
+/// One stage's measured cost.
+pub struct StageCost {
+    pub name: &'static str,
+    pub cumulative: f64,
+    pub this_stage: f64,
+    pub spread: f64,
+    /// True when the stage's cost is smaller than its own run-to-run spread,
+    /// in which case it is not a measurement and must not be quoted as one.
+    pub unresolved: bool,
+}
+
+/// The stage budget, by cumulative prefix.
+///
+/// Could not be resolved on the development laptop: five of six stages came in
+/// under their own noise floor, because macOS offers no CPU pinning and the M2
+/// mixes performance and efficiency cores. A dedicated, idle VM may do better --
+/// which is the point of running it here rather than renting a machine to find
+/// out.
+///
+/// Repetitions are round-robin across stages, never blocked per stage. Timing
+/// all runs of one stage before the next lets load drift accumulate along the
+/// stage order, and differencing then produces a negative cost. That is not
+/// hypothetical; it happened, and a negative time is the only reason it was
+/// noticed.
+pub fn stage_budget(corpus: &Corpus) -> Vec<StageCost> {
+    const REPS: usize = 9;
+    let frames = &corpus.frames;
+
+    // Warm on the FULL pipeline first, or the first prefix to build a book pays
+    // every page fault and the stage after it comes out negative.
+    {
+        let mut p: Pipeline<SortedLevels> = Pipeline::with_capacity(1024);
+        for f in frames {
+            p.on_frame(f, Stage::Encode);
+        }
+        std::hint::black_box(&p.counters);
+    }
+
+    let mut best = vec![f64::MAX; Stage::ALL.len()];
+    let mut worst = vec![0f64; Stage::ALL.len()];
+    for _ in 0..REPS {
+        for (i, stage) in Stage::ALL.iter().enumerate() {
+            let mut p: Pipeline<SortedLevels> = Pipeline::with_capacity(1024);
+            let start = Instant::now();
+            for f in frames {
+                p.on_frame(f, *stage);
+            }
+            let ns = start.elapsed().as_nanos() as f64 / frames.len().max(1) as f64;
+            best[i] = best[i].min(ns);
+            worst[i] = worst[i].max(ns);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut last = 0f64;
+    for (i, stage) in Stage::ALL.iter().enumerate() {
+        let delta = best[i] - last;
+        let spread = worst[i] - best[i];
+        out.push(StageCost {
+            name: stage.name(),
+            cumulative: best[i],
+            this_stage: delta,
+            spread,
+            unresolved: delta < spread,
+        });
+        last = best[i];
+    }
+    out
 }
 
 /// Top of book for a handful of symbols, so a visitor sees an actual market

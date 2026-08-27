@@ -117,6 +117,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             respond(&mut stream, 200, "application/json", &body)
         }
         "/run" => run_endpoint(&mut stream, query),
+        "/budget" => budget_endpoint(&mut stream),
         "/" | "/index.html" => respond(
             &mut stream,
             200,
@@ -151,6 +152,42 @@ fn run_endpoint(stream: &mut TcpStream, query: &str) -> std::io::Result<()> {
     let report = bench::run(req, &corpus);
     RUNS_SERVED.fetch_add(1, Ordering::Relaxed);
     respond(stream, 200, "application/json", &to_json(&report))
+}
+
+/// The per-stage latency budget. Slower than `/run` because it makes nine
+/// round-robin passes over six prefixes, so it is a separate endpoint rather
+/// than part of every request.
+fn budget_endpoint(stream: &mut TcpStream) -> std::io::Result<()> {
+    if !WARM.load(Ordering::Acquire) {
+        return respond(stream, 503, "application/json", r#"{"error":"warming"}"#);
+    }
+    let _guard = slot().lock().unwrap_or_else(|e| e.into_inner());
+    let req = Request {
+        container: Container::Sorted,
+        duplicate_rate: 0.0,
+        gap_rate: 0.0,
+        load: 0.5,
+    };
+    let corpus = bench::build_corpus(req, SEGMENTS);
+    let stages = bench::stage_budget(&corpus);
+    let rows: Vec<String> = stages
+        .iter()
+        .map(|s| {
+            format!(
+                r#"{{"name":"{}","cumulative":{:.2},"this_stage":{:.2},"spread":{:.2},"unresolved":{}}}"#,
+                s.name, s.cumulative, s.this_stage, s.spread, s.unresolved
+            )
+        })
+        .collect();
+    let unresolved = stages.iter().filter(|s| s.unresolved).count();
+    let body = format!(
+        r#"{{"arch":"{}","unresolved":{},"of":{},"stages":[{}]}}"#,
+        std::env::consts::ARCH,
+        unresolved,
+        stages.len(),
+        rows.join(",")
+    );
+    respond(stream, 200, "application/json", &body)
 }
 
 fn param(query: &str, key: &str) -> Option<String> {
