@@ -744,79 +744,9 @@ footer .mono { font-family: var(--mono); font-size: 12px; }
     <p class="prose lede" style="margin-bottom:26px">About <strong>110 nanoseconds</strong> from a
       packet arriving to an order being encoded. Run against <strong>40 million real messages</strong>
       from a real exchange: zero decode errors, zero corrupted books.</p>
-    <p class="prose">A nanosecond is a billionth of a second. Light travels about a foot in one.
-      The whole pipeline &mdash; unwrap the packet, work out what changed, update the book, decide,
-      write the order &mdash; fits in roughly a hundred of them.</p>
   </section>
 
   <!-- ============================ WHY IT'S IMPRESSIVE — 1 ============================ -->
-  <section class="section">
-    <p class="eyebrow">Why it is impressive &mdash; one of two</p>
-    <h2 class="wide">The part everyone skips</h2>
-
-    <p class="prose lede">Almost every "I built an order book" project opens a file of clean, ordered
-      messages and parses it. That is the easy version, with the network's misbehaviour already
-      deleted. <strong>This one handles the wire.</strong></p>
-
-    <p class="prose">Building it exposed two bugs that were invisible on clean data and fatal in
-      production.</p>
-
-    <div class="pull" style="margin:26px 0">
-      <div class="n">73%</div>
-      <div class="t">of messages were being <b>silently dropped</b> under 2% packet loss. The
-        pipeline looked completely healthy right up until it wasn't &mdash; no crash, no error, no
-        warning. Just a book quietly drifting away from the real market.</div>
-    </div>
-
-    <p class="prose">Handling the wire means: work out where one message ends and the next begins,
-      spot a missing sequence number without declaring loss the instant a packet arrives out of
-      order, ask for a retransmission, take the first of two copies and throw away the second, and
-      record exactly what was lost rather than carrying on with a wrong book.</p>
-  </section>
-
-  <!-- ============================ WHY IT'S IMPRESSIVE — 2 ============================ -->
-  <section class="section">
-    <p class="eyebrow">Why it is impressive &mdash; two of two</p>
-    <h2 class="wide">Not trusting your own instruments</h2>
-
-    <p class="prose lede">Anyone can build a scale. The hard part is knowing your scale is accurate
-      &mdash; because if it isn't, every measurement is wrong and <strong>the numbers still look
-      fine</strong>.</p>
-
-    <p class="prose" style="margin-bottom:28px">Eight times, the code ran, produced a number, and the
-      number was wrong in a way that looked entirely reasonable. Four of them:</p>
-
-    <div class="bugs">
-      <div class="bug">
-        <div class="rep">&minus;239 ns<small>reported stage cost</small></div>
-        <div class="why">A processing stage that took <b>negative time</b>. Caught only because
-          negative time is impossible &mdash; an inflated but positive number would have shipped as
-          a finding.</div>
-      </div>
-      <div class="bug">
-        <div class="rep">1.38&times;<small>reported speedup</small></div>
-        <div class="why">A <b>38% speedup</b> that was really the laptop being busier during one test
-          than the other. Time the two configurations interleaved instead of one after the other and
-          the difference disappears.</div>
-      </div>
-      <div class="bug">
-        <div class="rep">0<small>reported corrupted books</small></div>
-        <div class="why">"Zero corrupted books" &mdash; because the check ran <b>after the market
-          closed</b>, when the book was empty. It measured nothing, cleanly.</div>
-      </div>
-      <div class="bug">
-        <div class="rep">512<small>reported latency</small></div>
-        <div class="why">A histogram reporting <b>its own internal bucket size</b> as if it were a
-          latency figure. Meaningless, and in exactly the right range to look plausible.</div>
-      </div>
-    </div>
-
-    <p class="prose" style="margin-top:28px">Every one of those is a number you would have put on a
-      r&eacute;sum&eacute;. That is the skill: in trading, a backtest saying you will make money is
-      worthless if the measurement is broken, and firms lose real money to exactly this.</p>
-  </section>
-
-  <!-- ============================ COORDINATED OMISSION ============================ -->
   <section class="section">
     <p class="eyebrow">The measurement error at the centre of this</p>
     <h2 class="wide">How a speed test hides its own stalls</h2>
