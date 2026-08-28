@@ -61,8 +61,8 @@ Scaling the existing Fly machine is the cheapest first move by a wide margin,
 because the deployment already exists:
 
 ```bash
-flyctl scale vm performance-2x --app latency-ladder   # run the benchmarks
-flyctl scale vm shared-cpu-1x  --app latency-ladder   # scale back down
+flyctl scale vm performance-2x --app nanobook   # run the benchmarks
+flyctl scale vm shared-cpu-1x  --app nanobook   # scale back down
 ```
 
 **Do not rent anything monthly for this.** The measurements are one-off.
