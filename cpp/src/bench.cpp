@@ -13,9 +13,9 @@
 #include <string>
 #include <vector>
 
-#include "ll/book.hpp"
-#include "ll/capture.hpp"
-#include "ll/deep.hpp"
+#include "nb/book.hpp"
+#include "nb/capture.hpp"
+#include "nb/deep.hpp"
 
 namespace {
 
@@ -39,21 +39,21 @@ struct Counters {
 };
 
 /// One full pass: pcap record -> frame -> segment -> DEEP -> book.
-Counters run_once(const std::vector<ll::Bytes>& frames) {
-    ll::Book book(8192);
+Counters run_once(const std::vector<nb::Bytes>& frames) {
+    nb::Book book(8192);
     Counters c;
     for (const auto& f : frames) {
         ++c.packets;
-        const auto dg = ll::parse_frame(f);
+        const auto dg = nb::parse_frame(f);
         if (!dg) continue;
-        const auto seg = ll::parse_segment(dg->payload);
+        const auto seg = nb::parse_segment(dg->payload);
         if (!seg) continue;
-        ll::MessageIter it(*seg);
+        nb::MessageIter it(*seg);
         while (const auto body = it.next()) {
-            const auto msg = ll::parse_message(*body);
+            const auto msg = nb::parse_message(*body);
             if (!msg) continue;
             ++c.messages;
-            if (const auto* u = std::get_if<ll::PriceLevelUpdate>(&*msg)) {
+            if (const auto* u = std::get_if<nb::PriceLevelUpdate>(&*msg)) {
                 book.apply(*u);
                 ++c.book_updates;
             }
@@ -82,9 +82,9 @@ int main(int argc, char** argv) {
 
     // Collect frames up front so the timed loop measures the pipeline, not the
     // capture reader.
-    std::vector<ll::Bytes> frames;
+    std::vector<nb::Bytes> frames;
     {
-        auto r = ll::PcapReader::open(ll::Bytes(buf));
+        auto r = nb::PcapReader::open(nb::Bytes(buf));
         if (!r) {
             std::fprintf(stderr, "%s: not a pcap file\n", argv[1]);
             return 1;

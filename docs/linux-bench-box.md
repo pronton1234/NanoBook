@@ -176,7 +176,7 @@ an ordinary UDP socket and once with AF_XDP. The delta between those two is R2.
 ### 7. Run
 
 ```bash
-git clone https://github.com/pronton1234/LatencyLadder && cd LatencyLadder
+git clone https://github.com/pronton1234/NanoBook && cd NanoBook
 # Fetch a capture; see the README. Do not commit it.
 taskset -c 2 cargo run --release --example budget   -- data/raw/<file>.pcap
 taskset -c 2,3 cargo run --release --example threaded -- data/raw/<file>.pcap

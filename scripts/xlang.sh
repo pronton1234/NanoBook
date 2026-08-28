@@ -7,7 +7,7 @@
 # Taking the minimum does not rescue it: the minimum over a busy window is still
 # worse than the minimum over a quiet one.
 set -euo pipefail
-CAP="${1:-/tmp/ll-bench.pcap}"
+CAP="${1:-/tmp/nb-bench.pcap}"
 ROUNDS="${2:-6}"
 
 rust_best=99999; rust_worst=0
@@ -15,7 +15,7 @@ cpp_best=99999;  cpp_worst=0
 
 for i in $(seq 1 "$ROUNDS"); do
   r=$(./target/release/examples/xlang "$CAP" 1 | awk '/tick-to-book/ {print $3}')
-  c=$(./cpp/build/ll_bench   "$CAP" 1 | awk '/tick-to-book/ {print $3}')
+  c=$(./cpp/build/nb_bench   "$CAP" 1 | awk '/tick-to-book/ {print $3}')
   rust_best=$(python3 -c "print(min($rust_best,$r))")
   rust_worst=$(python3 -c "print(max($rust_worst,$r))")
   cpp_best=$(python3 -c "print(min($cpp_best,$c))")

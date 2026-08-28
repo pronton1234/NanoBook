@@ -11,8 +11,8 @@ FROM debian:bookworm-slim
 # Unprivileged: the server binds a socket and runs benchmarks, and needs
 # nothing else.
 RUN useradd -m -u 10001 app
-COPY --from=build /src/target/release/latency-ladder-server /usr/local/bin/
+COPY --from=build /src/target/release/nanobook-server /usr/local/bin/
 USER app
 ENV PORT=8080
 EXPOSE 8080
-CMD ["latency-ladder-server"]
+CMD ["nanobook-server"]

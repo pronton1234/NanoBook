@@ -18,7 +18,7 @@
 #include <optional>
 #include <span>
 
-namespace ll {
+namespace nb {
 
 using Bytes = std::span<const std::uint8_t>;
 
@@ -124,4 +124,4 @@ private:
     std::uint16_t remaining_ = 0;
 };
 
-}  // namespace ll
+}  // namespace nb

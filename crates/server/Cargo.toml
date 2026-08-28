@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "latency-ladder-server"
+name = "nanobook-server"
 path = "src/main.rs"
 
 [dependencies]

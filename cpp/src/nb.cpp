@@ -1,13 +1,13 @@
 // Implementations for the header-declared decode and book paths.
-#include "ll/book.hpp"
-#include "ll/capture.hpp"
-#include "ll/deep.hpp"
-#include "ll/price.hpp"
+#include "nb/book.hpp"
+#include "nb/capture.hpp"
+#include "nb/deep.hpp"
+#include "nb/price.hpp"
 
 #include <algorithm>
 #include <cstdio>
 
-namespace ll {
+namespace nb {
 
 // ---------------------------------------------------------------- price -----
 
@@ -266,4 +266,4 @@ std::uint64_t Book::total_size() const noexcept {
     return t;
 }
 
-}  // namespace ll
+}  // namespace nb

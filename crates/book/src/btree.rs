@@ -1,9 +1,9 @@
 //! R0: the obvious implementation, `BTreeMap<Price, u32>`.
 //!
-//! This is the baseline the ladder measures against, and it is deliberately the
-//! version a competent engineer writes first. It is not a strawman — it is
-//! correct, it is ordered, and `max`/`min` are genuinely cheap because a B-tree
-//! knows its own extremes.
+//! This is the baseline every other container is measured against, and it is
+//! deliberately the version a competent engineer writes first. It is not a
+//! strawman — it is correct, it is ordered, and `max`/`min` are genuinely
+//! cheap because a B-tree knows its own extremes.
 //!
 //! What it pays is locality. Every `set` walks a tree of heap-allocated nodes,
 //! and a price level update touches a node the cache has probably evicted. With

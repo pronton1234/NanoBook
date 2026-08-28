@@ -1,5 +1,5 @@
 [project]
-name = "latency-ladder-analysis"
+name = "nanobook-analysis"
 version = "0.1.0"
 description = "Statistical analysis of book state exported by the Rust pipeline."
 requires-python = ">=3.10"

@@ -16,7 +16,7 @@
 #include <optional>
 #include <string>
 
-namespace ll {
+namespace nb {
 
 class Price {
 public:
@@ -54,4 +54,4 @@ private:
     std::int64_t units_ = 0;
 };
 
-}  // namespace ll
+}  // namespace nb

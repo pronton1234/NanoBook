@@ -28,12 +28,12 @@
 #include <utility>
 #include <vector>
 
-#include "ll/deep.hpp"
-#include "ll/flat_map.hpp"
-#include "ll/price.hpp"
-#include "ll/symbol.hpp"
+#include "nb/deep.hpp"
+#include "nb/flat_map.hpp"
+#include "nb/price.hpp"
+#include "nb/symbol.hpp"
 
-namespace ll {
+namespace nb {
 
 using Level = std::pair<Price, std::uint32_t>;
 
@@ -128,4 +128,4 @@ private:
     FlatMap<Symbol, SymbolBook, SymbolHash> books_;
 };
 
-}  // namespace ll
+}  // namespace nb

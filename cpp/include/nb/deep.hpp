@@ -15,11 +15,11 @@
 #include <optional>
 #include <variant>
 
-#include "ll/capture.hpp"
-#include "ll/price.hpp"
-#include "ll/symbol.hpp"
+#include "nb/capture.hpp"
+#include "nb/price.hpp"
+#include "nb/symbol.hpp"
 
-namespace ll {
+namespace nb {
 
 enum class Side : std::uint8_t { Buy, Sell };
 
@@ -89,4 +89,4 @@ inline constexpr std::uint8_t kTradeBreak = 0x42;
 /// length; an unknown type is reported, not rejected.
 [[nodiscard]] std::optional<Message> parse_message(Bytes body) noexcept;
 
-}  // namespace ll
+}  // namespace nb

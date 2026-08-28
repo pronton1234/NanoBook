@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace ll {
+namespace nb {
 
 template <typename Key, typename Value, typename Hash>
 class FlatMap {
@@ -99,4 +99,4 @@ private:
     std::size_t size_ = 0;
 };
 
-}  // namespace ll
+}  // namespace nb

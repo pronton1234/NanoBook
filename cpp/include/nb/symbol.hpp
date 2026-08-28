@@ -13,7 +13,7 @@
 #include <cstring>
 #include <string_view>
 
-namespace ll {
+namespace nb {
 
 class Symbol {
 public:
@@ -68,4 +68,4 @@ struct SymbolHash {
     }
 };
 
-}  // namespace ll
+}  // namespace nb

@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "ll/book.hpp"
-#include "ll/capture.hpp"
-#include "ll/deep.hpp"
+#include "nb/book.hpp"
+#include "nb/capture.hpp"
+#include "nb/deep.hpp"
 
 namespace {
 
@@ -31,7 +31,7 @@ void check(bool cond, const char* what, int line) {
 // ------------------------------------------------------------ price ---------
 
 void test_price_is_exact() {
-    using ll::Price;
+    using nb::Price;
     CHECK(Price::from_parts(99, 9900).to_string() == "99.99");
     CHECK(Price::from_parts(0, 1).to_string() == "0.0001");
     CHECK(Price{1'000'000}.to_string() == "100.00");
@@ -51,17 +51,17 @@ void test_price_is_exact() {
 }
 
 void test_symbol_padding_and_hash() {
-    const auto s = ll::Symbol::from_ticker("AAPL");
+    const auto s = nb::Symbol::from_ticker("AAPL");
     CHECK(s.trimmed() == "AAPL");
-    CHECK(s == ll::Symbol::from_ticker("AAPL"));
-    CHECK(!(s == ll::Symbol::from_ticker("AAPY")));
-    CHECK(ll::Symbol::from_ticker("ABCDEFGH").trimmed() == "ABCDEFGH");
+    CHECK(s == nb::Symbol::from_ticker("AAPL"));
+    CHECK(!(s == nb::Symbol::from_ticker("AAPY")));
+    CHECK(nb::Symbol::from_ticker("ABCDEFGH").trimmed() == "ABCDEFGH");
 
     // Similar tickers must not collide, or the symbol map degenerates.
-    ll::SymbolHash h;
+    nb::SymbolHash h;
     std::vector<std::size_t> hs;
     for (const char* t : {"AAPL", "AAPM", "AAPN", "BAPL", "SPY", "SPZ", "QQQ"})
-        hs.push_back(h(ll::Symbol::from_ticker(t)));
+        hs.push_back(h(nb::Symbol::from_ticker(t)));
     for (std::size_t i = 0; i < hs.size(); ++i)
         for (std::size_t j = i + 1; j < hs.size(); ++j) CHECK(hs[i] != hs[j]);
 }
@@ -76,7 +76,7 @@ std::vector<std::uint8_t> make_plu(std::uint8_t kind, std::uint8_t flags, const 
     const std::int64_t ts = 1'500'000'000'000'000'000;
     v.insert(v.end(), reinterpret_cast<const std::uint8_t*>(&ts),
              reinterpret_cast<const std::uint8_t*>(&ts) + 8);
-    const auto s = ll::Symbol::from_ticker(sym);
+    const auto s = nb::Symbol::from_ticker(sym);
     const std::uint64_t su = s.as_u64();
     v.insert(v.end(), reinterpret_cast<const std::uint8_t*>(&su),
              reinterpret_cast<const std::uint8_t*>(&su) + 8);
@@ -88,14 +88,14 @@ std::vector<std::uint8_t> make_plu(std::uint8_t kind, std::uint8_t flags, const 
 }
 
 void test_deep_decode() {
-    const auto raw = make_plu(ll::kPriceLevelBuy, 0x01, "AAPL", 100, 1'865'500);
+    const auto raw = make_plu(nb::kPriceLevelBuy, 0x01, "AAPL", 100, 1'865'500);
     CHECK(raw.size() == 30);
-    const auto m = ll::parse_message(ll::Bytes(raw));
+    const auto m = nb::parse_message(nb::Bytes(raw));
     CHECK(m.has_value());
-    const auto* u = std::get_if<ll::PriceLevelUpdate>(&*m);
+    const auto* u = std::get_if<nb::PriceLevelUpdate>(&*m);
     CHECK(u != nullptr);
     if (u) {
-        CHECK(u->side == ll::Side::Buy);
+        CHECK(u->side == nb::Side::Buy);
         CHECK(u->symbol.trimmed() == "AAPL");
         CHECK(u->size == 100);
         CHECK(u->price.to_string() == "186.55");
@@ -105,47 +105,47 @@ void test_deep_decode() {
 
     // Bit 7 is NOT the completion flag. The Rust implementation used 0x80 and
     // no synthetic test caught it; only real data did.
-    const auto wrongbit = make_plu(ll::kPriceLevelSell, 0x80, "MSFT", 1, 100);
-    const auto m2 = ll::parse_message(ll::Bytes(wrongbit));
-    const auto* u2 = std::get_if<ll::PriceLevelUpdate>(&*m2);
+    const auto wrongbit = make_plu(nb::kPriceLevelSell, 0x80, "MSFT", 1, 100);
+    const auto m2 = nb::parse_message(nb::Bytes(wrongbit));
+    const auto* u2 = std::get_if<nb::PriceLevelUpdate>(&*m2);
     CHECK(u2 && !u2->event_complete());
 
     // A known type at the wrong length means the framing above is wrong.
-    auto bad = make_plu(ll::kPriceLevelBuy, 0x01, "AAPL", 1, 100);
+    auto bad = make_plu(nb::kPriceLevelBuy, 0x01, "AAPL", 1, 100);
     bad.push_back(0);
-    CHECK(!ll::parse_message(ll::Bytes(bad)).has_value());
+    CHECK(!nb::parse_message(nb::Bytes(bad)).has_value());
 
     // An unknown type is reported, not rejected.
     const std::vector<std::uint8_t> unk{0xEE, 1, 2};
-    const auto m3 = ll::parse_message(ll::Bytes(unk));
-    CHECK(m3 && std::get_if<ll::Unknown>(&*m3) != nullptr);
+    const auto m3 = nb::parse_message(nb::Bytes(unk));
+    CHECK(m3 && std::get_if<nb::Unknown>(&*m3) != nullptr);
 
     // Truncation must never read out of bounds.
     for (std::size_t n = 0; n < raw.size(); ++n)
-        (void)ll::parse_message(ll::Bytes(raw.data(), n));
+        (void)nb::parse_message(nb::Bytes(raw.data(), n));
 }
 
 // ------------------------------------------------------------- book ---------
 
-ll::PriceLevelUpdate upd(ll::Side side, const char* sym, ll::Price p, std::uint32_t size,
+nb::PriceLevelUpdate upd(nb::Side side, const char* sym, nb::Price p, std::uint32_t size,
                          bool complete) {
-    ll::PriceLevelUpdate u;
+    nb::PriceLevelUpdate u;
     u.side = side;
     u.flags = complete ? 0x01 : 0x00;
-    u.symbol = ll::Symbol::from_ticker(sym);
+    u.symbol = nb::Symbol::from_ticker(sym);
     u.size = size;
     u.price = p;
     return u;
 }
 
 void test_book() {
-    using ll::Price;
-    using ll::Side;
-    ll::Book b(16);
+    using nb::Price;
+    using nb::Side;
+    nb::Book b(16);
 
     b.apply(upd(Side::Buy, "AAPL", Price::from_parts(186, 5500), 100, true));
     b.apply(upd(Side::Sell, "AAPL", Price::from_parts(186, 5700), 200, true));
-    const auto* sb = b.get(ll::Symbol::from_ticker("AAPL"));
+    const auto* sb = b.get(nb::Symbol::from_ticker("AAPL"));
     CHECK(sb != nullptr);
     if (sb) {
         CHECK(sb->bids.max()->first == Price::from_parts(186, 5500));
@@ -154,55 +154,55 @@ void test_book() {
     CHECK(b.stats.crossed_when_stable == 0);
 
     // Best bid is the max, best ask the min, whatever the arrival order.
-    ll::Book c(16);
+    nb::Book c(16);
     for (auto cents : {0, 2, -2}) {
         const auto p = Price::from_parts(10, cents * 100);
         c.apply(upd(Side::Buy, "X", p, 1, true));
         c.apply(upd(Side::Sell, "X", p, 1, true));
     }
-    const auto* x = c.get(ll::Symbol::from_ticker("X"));
+    const auto* x = c.get(nb::Symbol::from_ticker("X"));
     CHECK(x && x->bids.max()->first == Price::from_parts(10, 200));
     CHECK(x && x->asks.min()->first == Price::from_parts(10, -200));
 
     // Deleting the touch must uncover the next level, not empty the side.
-    ll::Book d(16);
+    nb::Book d(16);
     d.apply(upd(Side::Buy, "X", Price::from_parts(10, 0), 100, true));
     d.apply(upd(Side::Buy, "X", Price::from_parts(10, 100), 200, true));
     d.apply(upd(Side::Buy, "X", Price::from_parts(10, 100), 0, true));
-    const auto* dx = d.get(ll::Symbol::from_ticker("X"));
+    const auto* dx = d.get(nb::Symbol::from_ticker("X"));
     CHECK(dx && dx->bids.size() == 1);
     CHECK(dx && dx->bids.max()->first == Price::from_parts(10, 0));
 
     // Crossing counts only at an event boundary. Mid-event the feed is
     // legitimately crossed and an assert there fires on a healthy feed.
-    ll::Book e(16);
+    nb::Book e(16);
     e.apply(upd(Side::Buy, "Y", Price::from_parts(10, 500), 100, false));
     e.apply(upd(Side::Sell, "Y", Price::from_parts(10, 0), 100, false));
     CHECK(e.stats.crossed_when_stable == 0);
 
-    ll::Book f(16);
+    nb::Book f(16);
     f.apply(upd(Side::Buy, "Z", Price::from_parts(10, 500), 100, true));
     f.apply(upd(Side::Sell, "Z", Price::from_parts(10, 0), 100, true));
     CHECK(f.stats.crossed_when_stable == 1);
 
     // Locked is not crossed. Folding them together lets a real crossing hide.
-    ll::Book g(16);
+    nb::Book g(16);
     g.apply(upd(Side::Buy, "W", Price::from_parts(10, 0), 100, true));
     g.apply(upd(Side::Sell, "W", Price::from_parts(10, 0), 100, true));
     CHECK(g.stats.locked_when_stable == 1);
     CHECK(g.stats.crossed_when_stable == 0);
 
     // A delete for a level never held is normal mid-session, not a crash.
-    ll::Book h(16);
+    nb::Book h(16);
     h.apply(upd(Side::Buy, "Q", Price::from_parts(42, 0), 0, true));
-    const auto* hq = h.get(ll::Symbol::from_ticker("Q"));
+    const auto* hq = h.get(nb::Symbol::from_ticker("Q"));
     CHECK(hq && hq->bids.empty());
 }
 
 /// Levels must stay sorted and the parallel arrays must never disagree.
 void test_levels_stay_sorted() {
-    using ll::Price;
-    ll::Levels l;
+    using nb::Price;
+    nb::Levels l;
     const int order[] = {5, 1, 9, 3, 7, 0, 8, 2};
     for (int k : order) l.set(Price::from_parts(100, k * 100), static_cast<std::uint32_t>(k + 1));
     CHECK(l.size() == 8);

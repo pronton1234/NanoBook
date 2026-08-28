@@ -4,7 +4,7 @@
 //! orders, so a side of a book is a price-to-size map and there is no order-id
 //! graph to maintain. That makes the container the whole engineering question,
 //! which is why [`Levels`] is a trait and why every implementation of it is a
-//! rung on the ladder rather than a refactor.
+//! separately measured contender rather than a refactor.
 //!
 //! ## Why the crossed check is gated on `event_complete`
 //!

@@ -1,11 +1,11 @@
-# Latency Ladder
+# NanoBook
 
 **The piece of a trading system that turns raw exchange network traffic into a
 correct picture of the market in ~110 nanoseconds.**
 
-[![CI](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml/badge.svg)](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml)
+[![CI](https://github.com/pronton1234/NanoBook/actions/workflows/ci.yml/badge.svg)](https://github.com/pronton1234/NanoBook/actions/workflows/ci.yml)
 
-### ▶ [Run it live](https://pronton1234.github.io/LatencyLadder/)
+### ▶ [Run it live](https://pronton1234.github.io/NanoBook/)
 
 **New here?** [PROJECT.md](PROJECT.md) explains this in two halves — plain
 English for anyone, then a full technical account for someone who will read the
