@@ -8,6 +8,10 @@ most projects skip.**
 
 ### ▶ [Run it live](https://pronton1234.github.io/LatencyLadder/)
 
+**New here?** [PROJECT.md](PROJECT.md) explains this in two halves — plain
+English for anyone, then a full technical account for someone who will read the
+code.
+
 ---
 
 ## What problem this solves
