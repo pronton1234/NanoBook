@@ -1,8 +1,7 @@
 # Latency Ladder
 
 **The piece of a trading system that turns raw exchange network traffic into a
-correct picture of the market in ~110 nanoseconds — including the messy parts
-most projects skip.**
+correct picture of the market in ~110 nanoseconds.**
 
 [![CI](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml/badge.svg)](https://github.com/pronton1234/LatencyLadder/actions/workflows/ci.yml)
 
@@ -67,44 +66,6 @@ book       rebuild who wants to buy and sell at what price
 decide     a deliberately trivial placeholder, so it occupies its real cost
 encode     write an order back onto the wire
 ```
-
-## Why it is worth looking at
-
-### The part everyone skips
-
-Almost every "I built an order book" project opens a *file* of clean, ordered
-messages and parses it — the easy version, with the network's misbehaviour
-deleted. This handles the wire.
-
-Building it exposed two bugs that were invisible on clean data and would have
-been fatal in production: under 2% packet loss, the pipeline was silently
-dropping **73% of messages**. It looked completely healthy right up until it
-wasn't.
-
-### Not trusting your own instruments
-
-Anyone can build a scale. The hard part is knowing your scale is accurate,
-because if it isn't, every measurement is wrong and **the numbers still look
-fine**.
-
-Eight times here, the code ran, produced a number, and the number was wrong in a
-way that looked entirely reasonable:
-
-| what it reported | what was actually happening |
-|---|---|
-| a stage taking **negative time** (−239 ns) | the first pass was paying page-fault costs. Caught *only* because negative time is impossible — an inflated but positive number would have shipped as a finding |
-| a **38% speedup** from threading | the laptop was busier during one test than the other |
-| **"zero corrupted books"** | the check ran after the market closed, when the book was empty. It measured nothing, cleanly |
-| a **p99 of 512** | that was the histogram's own internal bucket count |
-
-Every one of those is a number you would have put on a résumé.
-
-That is the skill the project is actually about. In trading, a backtest saying
-you will make money is worthless if the measurement is broken, and firms lose
-real money to exactly this. Two failed experiments are kept in the tree with the
-measurements that killed them, rather than quietly deleted.
-
----
 
 ## Three languages, each where it belongs
 
@@ -174,10 +135,14 @@ positive control is what makes the null meaningful.
 
 ## Status
 
-The transport layer (`crates/iextp`), the DEEP message decoder (`crates/deep`)
-and the order book (`crates/book`) are implemented, validated against real
-captures, and benchmarked. The tick-to-trade pipeline and the R2 kernel-bypass
-rung are next.
+The transport layer, the DEEP decoder, the order book and the full tick-to-trade
+pipeline are implemented, validated against real captures, and benchmarked, with
+a C++ second implementation and a Python statistics tier alongside.
+
+Not done, and labelled as such throughout: **kernel bypass** (AF_XDP, which needs
+Linux and control of boot parameters), **`perf` counters** (so the arena's
+cache-miss explanation remains a supported inference rather than a measurement),
+a **matching engine and order types**, and **FIX**.
 
 ## What works today
 
@@ -280,8 +245,9 @@ cargo run --release --example replay -- data/raw/<capture>.pcap
 
 Each of these was found by running against a capture, not by reading a spec:
 
-- **IEX ships two different formats under one `.pcap` extension.** The 2017 file
-  is classic pcap; the 2018 file is pcapng. A classic-pcap reader does not fail
+- **IEX ships two different formats under one `.pcap` extension.** The August
+  2017 fixture is classic pcap; the 2018 capture is pcapng — and which format a
+  given day carries is not predictable from its date, so it has to be sniffed. A classic-pcap reader does not fail
   on a pcapng file — it walks a 24-byte header and 16-byte record headers over
   block structure and emits plausible garbage. The Python decoder did exactly
   that, reporting price-level updates as 2.8% of traffic when the real figure is
