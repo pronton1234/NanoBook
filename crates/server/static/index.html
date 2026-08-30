@@ -4,56 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NanoBook</title>
-<meta name="description" content="A market data pipeline in Rust: about 110 nanoseconds from a packet arriving to an order being sent, run against 40 million real exchange messages with zero errors — and eight measurement bugs caught before any of the numbers were published.">
+<meta name="description" content="Run a market data pipeline against a broken network, and decode ten real exchange trading days, live in the browser.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
 <style>
 /* ------------------------------------------------------------------ *
- * NanoBook — one self-contained file. No external assets beyond
- * the Google Fonts stylesheet above; every face has a real fallback.
+ * NanoBook -- two instruments and nothing else.
  *
- * Palette "Calibration": cool grey paper, blue-biased ink, structural
- * navy, and a correction red reserved for numbers that turned out to be
- * wrong. Deliberately single-theme: this is a printed report, so every
- * colour is painted explicitly and the page holds on any host ground.
+ * One family in two voices, one accent, one logarithmic scale. The
+ * scale is the load-bearing idea: the measured latencies are plotted
+ * on it rather than listed, so the gap between the flattering and the
+ * honest number is something you see instead of something you read.
  * ------------------------------------------------------------------ */
 :root {
   color-scheme: light;
 
-  --paper:    #ECEEF1;
-  --sheet:    #FFFFFF;
-  --sheet-2:  #F5F7F9;
-  --sunk:     #E4E8EC;
+  --ground:  #E8EBEE;
+  --panel:   #FFFFFF;
+  --sunk:    #F0F3F5;
+  --well:    #DCE2E7;
 
-  --ink:      #111A22;
-  --ink-2:    #43505C;
-  --ink-3:    #75828E;
+  --ink:     #0D141A;
+  --ink-2:   #55616B;
+  --ink-3:   #8B959E;
 
-  --rule:     #D2D8DE;
-  --rule-2:   #E3E7EB;
+  --rule:    #D5DBE0;
+  --hair:    #E6EAED;
 
-  --navy:     #163A5F;
-  --navy-lt:  #2E5F8F;
-  --red:      #A93226;
-  --red-lt:   #C9564A;
-  --good:     #17624A;
-  --warn:     #8A5A0B;
+  --signal:  #14496F;
+  --alert:   #A33224;
+  --ok:      #146149;
+  --warn:    #8A5A0B;
 
-  /* Six ordered pipeline stages. Position on the ramp encodes stage
-     order, never magnitude. */
-  --s1: #9BB2C8;
-  --s2: #7E9CB8;
-  --s3: #6287A8;
-  --s4: #467298;
-  --s5: #2C5A80;
-  --s6: #163A5F;
-
-  --serif: "Newsreader", Georgia, "Times New Roman", serif;
-  --sans:  "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --mono:  "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-
-  --measure: 66ch;
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -64,870 +49,321 @@ html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 }
 
 body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: 16px;
-  line-height: 1.62;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
+  margin: 0; background: var(--ground); color: var(--ink);
+  font-family: var(--sans); font-size: 15.5px; line-height: 1.6;
+  overflow-x: hidden; -webkit-font-smoothing: antialiased;
 }
 
-a { color: var(--navy); text-decoration-color: rgba(22,58,95,.34); text-underline-offset: 3px; }
-a:hover { text-decoration-color: var(--navy); }
-:focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; border-radius: 2px; }
+a { color: var(--signal); text-decoration-color: rgba(20,73,111,.32); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--signal); }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 1px; }
 
-.wrap { max-width: 1080px; margin: 0 auto; padding: 0 22px; }
+.wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
 
-/* ---------------- section rhythm ---------------- */
+/* ---------------- masthead ---------------- */
 
-.section { padding: 68px 0; border-top: 1px solid var(--rule); }
-
-.eyebrow {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: .17em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin: 0 0 16px;
+.top {
+  display: flex; flex-wrap: wrap; gap: 10px 18px;
+  align-items: baseline; justify-content: space-between;
+  padding: 26px 0 24px;
 }
+.top .id { font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.top .id span { color: var(--ink-3); font-weight: 400; margin-left: 10px; font-size: 13px; }
+.top a { font-family: var(--mono); font-size: 12.5px; }
 
+/* ---------------- sections ---------------- */
+
+.section { padding: 46px 0 58px; border-top: 1px solid var(--rule); }
+/* Also used as the section heading where the section needs no sentence, so it
+   resets the h2 type rather than inheriting it. */
+.lab {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3);
+  margin: 0 0 20px; line-height: 1.5; max-width: none;
+}
 h2 {
-  font-family: var(--serif);
-  font-size: clamp(25px, 3.8vw, 35px);
-  font-weight: 500;
-  letter-spacing: -.012em;
-  line-height: 1.18;
-  margin: 0 0 18px;
-  max-width: 22ch;
-  text-wrap: balance;
+  font-size: clamp(22px, 3vw, 29px); font-weight: 500; letter-spacing: -.02em;
+  line-height: 1.2; margin: 0 0 18px; max-width: 24ch; text-wrap: balance;
 }
-h2.wide { max-width: 30ch; }
-
-h3 {
-  font-family: var(--sans);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -.004em;
-  line-height: 1.4;
-  margin: 0 0 8px;
-  text-wrap: balance;
-}
-
-p { margin: 0 0 16px; }
-.prose { max-width: var(--measure); color: var(--ink-2); }
+p { margin: 0 0 14px; }
+.prose { max-width: 62ch; color: var(--ink-2); }
 .prose strong, .prose b { color: var(--ink); font-weight: 600; }
 .prose > :last-child { margin-bottom: 0; }
-.lede { font-size: 18.5px; line-height: 1.55; color: var(--ink); }
-.small { font-size: 13.5px; }
-.stack { display: grid; gap: 28px; }
-
-.subhead {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin: 0 0 12px;
+.small { font-size: 13px; line-height: 1.55; }
+.sub {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 11px;
 }
+.stack { display: grid; gap: 26px; }
 
-/* ---------------- hero ---------------- */
-
-.hero { padding: 56px 0 52px; }
-
-/* A measurement rule: the latency scale the page is built around,
-   drawn with real ticks. */
-.rule-strip {
-  height: 26px;
-  margin-bottom: 34px;
-  background:
-    repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 16px) bottom / 100% 9px no-repeat,
-    repeating-linear-gradient(90deg, var(--ink-3) 0 1px, transparent 1px 80px) bottom / 100% 17px no-repeat;
-  border-bottom: 1px solid var(--ink-3);
-  opacity: .55;
-}
-
-.title {
-  font-family: var(--serif);
-  font-size: clamp(42px, 8.4vw, 72px);
-  font-weight: 500;
-  letter-spacing: -.026em;
-  line-height: .98;
-  margin: 0 0 20px;
-}
-
-.thesis {
-  font-size: clamp(18px, 2.3vw, 21px);
-  line-height: 1.48;
-  max-width: 40ch;
-  color: var(--ink);
-  margin: 0 0 26px;
-}
-.thesis b { font-weight: 600; }
-
-.herolinks { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 40px; }
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: .01em;
-  padding: 8px 14px;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  background: var(--sheet);
-  color: var(--ink);
-  text-decoration: none;
-}
-.pill:hover { border-color: var(--navy); color: var(--navy); }
-.pill .tick { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
-
-/* ---------------- number sheet ---------------- */
-
-.sheet {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
-  gap: 1px;
-  background: var(--rule);
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.fig { background: var(--sheet); padding: 18px 18px 16px; }
-.fig .v {
-  font-family: var(--mono);
-  font-size: clamp(21px, 2.7vw, 27px);
-  font-weight: 500;
-  letter-spacing: -.03em;
-  line-height: 1.05;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
-}
-.fig .v .u { font-size: .5em; letter-spacing: 0; color: var(--ink-3); margin-left: 3px; }
-.fig .k { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); }
-.fig .n { font-size: 11.5px; line-height: 1.35; color: var(--ink-3); margin-top: 5px; }
-.fig.zero .v { color: var(--good); }
-
-/* ---------------- panels & columns ---------------- */
-
-.panel {
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  padding: 22px;
-}
-.panel.tight { padding: 0; overflow: hidden; }
-
-.cols {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
-  gap: 16px;
-}
-
-.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-/* ---------------- numbered reason cards ---------------- */
-
-.reasons { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 2px; }
-@media (min-width: 780px) { .reasons { grid-template-columns: repeat(3, 1fr); } }
-
-.reason { background: var(--sheet); padding: 22px 20px 24px; display: grid; align-content: start; gap: 10px; }
-.reason .ix {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .12em;
-  color: var(--navy);
-}
-.reason h3 { margin: 0; }
-.reason p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
-.reason p strong { color: var(--ink); font-weight: 600; }
-
-/* ---------------- pull figure ---------------- */
-
-.pull {
-  border-left: 3px solid var(--red);
-  background: var(--sheet);
-  padding: 20px 22px;
-  border-radius: 0 2px 2px 0;
-  display: grid;
-  gap: 6px;
-  max-width: 62ch;
-}
-.pull .n {
-  font-family: var(--mono);
-  font-size: clamp(26px, 4vw, 34px);
-  font-weight: 500;
-  letter-spacing: -.03em;
-  line-height: 1;
-  color: var(--red);
-  font-variant-numeric: tabular-nums;
-}
-.pull .t { font-size: 14.5px; line-height: 1.5; color: var(--ink-2); }
-.pull .t b { color: var(--ink); font-weight: 600; }
-
-/* ---------------- errata (the wrong numbers) ---------------- */
-
-.bugs { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 2px; }
-@media (min-width: 720px) { .bugs { grid-template-columns: 1fr 1fr; } }
-
-.bug { background: var(--sheet); padding: 20px; display: grid; gap: 12px; align-content: start; }
-@media (min-width: 560px) { .bug { grid-template-columns: 128px 1fr; gap: 18px; } }
-
-.rep {
-  font-family: var(--mono);
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: -.03em;
-  color: var(--red);
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  border-top: 2px solid var(--red);
-  padding-top: 10px;
-  align-self: start;
-}
-.rep small {
-  display: block;
-  font-family: var(--sans);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin-top: 6px;
-  line-height: 1.3;
-}
-.why { font-size: 14px; line-height: 1.55; color: var(--ink-2); }
-.why b { color: var(--ink); font-weight: 600; }
-
-/* ---------------- coordinated omission ---------------- */
-
-.co { display: grid; gap: 26px; }
-
-.segmented { display: inline-flex; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; }
-.segmented button {
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 9px 18px;
-  border: 0;
-  border-left: 1px solid var(--rule);
-  background: var(--sheet-2);
-  color: var(--ink-2);
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-.segmented button:first-child { border-left: 0; }
-.segmented button:hover { background: var(--sunk); color: var(--ink); }
-.segmented button[aria-pressed="true"] { background: var(--navy); color: #fff; }
-
-.corows { display: grid; gap: 20px; }
-.corow .top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 14px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-.corow .lab { font-size: 13px; color: var(--ink-3); line-height: 1.35; }
-.corow .lab b { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.corow .num {
-  font-family: var(--mono);
-  font-size: clamp(19px, 3vw, 24px);
-  font-weight: 500;
-  letter-spacing: -.025em;
-  font-variant-numeric: tabular-nums;
-}
-.corow.service .num { color: var(--ink-3); }
-.corow.truth .num { color: var(--red); }
-
-.track { display: block; height: 12px; background: var(--sunk); border-radius: 1px; overflow: hidden; }
-.track i { display: block; height: 100%; transition: width .45s cubic-bezier(.22,.61,.36,1); }
-.corow.service .track i { background: var(--ink-3); }
-.corow.truth .track i { background: var(--red); }
-
-/* A real log axis: ticks sit at their true positions, not spaced evenly. */
-.axis { position: relative; height: 26px; margin-top: 2px; border-top: 1px solid var(--rule); }
-.axis span {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-  padding-top: 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-.axis span::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  left: 50%;
-  width: 1px;
-  height: 5px;
-  background: var(--rule);
-}
-
-.coverdict {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 18px;
-  align-items: start;
-  border-top: 1px solid var(--rule-2);
-  padding-top: 20px;
-}
-.coverdict .x {
-  font-family: var(--mono);
-  font-size: clamp(24px, 4vw, 32px);
-  font-weight: 600;
-  letter-spacing: -.035em;
-  color: var(--red);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.coverdict .t { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
-
-/* ---------------- the ladder (engineer detail) ---------------- */
-
-.ladder { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 2px; }
-.rung {
-  background: var(--sheet);
-  display: grid;
-  grid-template-columns: 34px 84px 1fr;
-  grid-template-areas: "ix nm ds" ". cost cost" ". bar bar";
-  align-items: baseline;
-  gap: 4px 10px;
-  padding: 14px 18px;
-}
-@media (min-width: 740px) {
-  .rung {
-    grid-template-columns: 34px 84px minmax(0,1fr) 82px 84px;
-    grid-template-areas: "ix nm ds cost bar";
-    align-items: center;
-    gap: 14px;
-  }
-}
-.rung .ix { grid-area: ix; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
-.rung .nm { grid-area: nm; font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--ink); }
-.rung .ds { grid-area: ds; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
-.rung .cost {
-  grid-area: cost;
-  font-family: var(--mono);
-  font-size: 14px;
-  color: var(--ink);
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-@media (min-width: 740px) { .rung .cost { text-align: right; } }
-.rung .cost .u { font-size: 11px; color: var(--ink-3); }
-.rung .bar { grid-area: bar; display: block; height: 8px; background: var(--sunk); border-radius: 1px; overflow: hidden; }
-.rung .bar i { display: block; height: 100%; width: var(--w); }
-.rung.r1 .bar i { background: var(--s1); }
-.rung.r2 .bar i { background: var(--s2); }
-.rung.r3 .bar i { background: var(--s3); }
-.rung.r4 .bar i { background: var(--s4); }
-.rung.r5 .bar i { background: var(--s5); }
-.rung.r6 .bar i { background: var(--s6); }
-
-/* ---------------- tables ---------------- */
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13.5px;
-  min-width: 460px;
-}
-thead th {
-  text-align: left;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  padding: 12px 16px;
-  background: var(--sheet-2);
-  border-bottom: 1px solid var(--rule);
-  white-space: nowrap;
-}
-tbody td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--rule-2);
-  vertical-align: top;
-  color: var(--ink);
-}
-tbody tr:last-child td { border-bottom: 0; }
-td.note, th.note { color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
-.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-th.num { text-align: right; }
-td.ok { color: var(--good); }
-td.badc { color: var(--red); }
-td.warnc { color: var(--warn); }
-tr.unres td { background: var(--sheet-2); }
-
-.minibar { display: block; height: 5px; margin-top: 7px; background: var(--sunk); border-radius: 1px; overflow: hidden; max-width: 190px; }
-.minibar i { display: block; height: 100%; background: var(--ink-3); }
-.minibar.win i { background: var(--good); }
-.minibar.lose i { background: var(--navy-lt); }
-
-.flag {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--warn);
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  padding: 1px 6px;
-  white-space: nowrap;
-}
-
-/* ---------------- live instrument ---------------- */
+.panel { background: var(--panel); border: 1px solid var(--rule); padding: 22px; }
+.panel.tight { padding: 0; }
+.scroll { overflow-x: auto; }
 
 .banner {
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--navy);
-  border-radius: 0 2px 2px 0;
-  padding: 16px 20px;
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--ink-2);
-  max-width: 78ch;
+  background: var(--sunk); border: 1px solid var(--rule); border-left: 2px solid var(--signal);
+  padding: 13px 16px; font-size: 13px; line-height: 1.5; color: var(--ink-2);
 }
 .banner b { color: var(--ink); font-weight: 600; }
 
-.ctl { display: grid; gap: 22px; }
-@media (min-width: 700px) { .ctl { grid-template-columns: 1fr 1fr; } }
+/* ---------------- controls ---------------- */
 
-.ctl label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 4px;
+.ctl { display: grid; gap: 22px 30px; }
+@media (min-width: 720px) { .ctl { grid-template-columns: 1fr 1fr; } }
+.ctl label { display: block; font-size: 13.5px; font-weight: 500; color: var(--ink); margin-bottom: 3px; }
+.ctl .val { font-family: var(--mono); color: var(--signal); font-weight: 600; }
+.ctl .hint { display: block; font-size: 12.5px; color: var(--ink-3); line-height: 1.45; margin-bottom: 10px; }
+/* Reserve two lines only where the columns sit side by side, so their sliders
+   align. In one column that reservation is just a hole under a short hint. */
+@media (min-width: 720px) { .ctl .hint { min-height: 2.9em; } }
+.ctl input[type=range] { width: 100%; accent-color: var(--signal); }
+.ctl select {
+  width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--rule); padding: 8px 10px;
 }
-.ctl .hint { display: block; font-size: 12.5px; font-weight: 400; line-height: 1.45; color: var(--ink-2); margin-bottom: 10px; }
-.ctl .hint em { font-style: normal; color: var(--navy); font-weight: 500; }
-.val { font-family: var(--mono); font-weight: 500; color: var(--navy); font-variant-numeric: tabular-nums; }
+/* Slider end-stops, so the range is readable without dragging it. The 100%
+   capacity mark is placed at its true position on the track, not centred by
+   flexbox -- the range runs 10..200, so capacity sits at 47.4%, not halfway. */
+.ends { position: relative; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+.ends .mid { position: absolute; left: 47.37%; transform: translateX(-50%); color: var(--ink-2); }
 
-input[type="range"] {
-  -webkit-appearance: none; appearance: none;
-  width: 100%; height: 22px; background: transparent; cursor: pointer; margin: 0;
+.bar-actions {
+  display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center;
+  margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--hair);
 }
-input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: var(--sunk); border-radius: 2px; }
-input[type="range"]::-moz-range-track { height: 4px; background: var(--sunk); border-radius: 2px; }
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 17px; height: 17px; margin-top: -6.5px;
-  border-radius: 50%; background: var(--navy); border: 2px solid var(--sheet);
-  box-shadow: 0 0 0 1px var(--navy);
-}
-input[type="range"]::-moz-range-thumb {
-  width: 15px; height: 15px; border-radius: 50%;
-  background: var(--navy); border: 2px solid var(--sheet); box-shadow: 0 0 0 1px var(--navy);
-}
-
-select {
-  width: 100%;
-  font-family: var(--sans);
-  font-size: 14px;
-  color: var(--ink);
-  background: var(--sheet-2);
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  padding: 9px 11px;
-  cursor: pointer;
-}
-
 .act {
-  font-family: var(--sans);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: .005em;
-  padding: 11px 22px;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  background: var(--sheet-2);
-  color: var(--ink);
-  cursor: pointer;
+  font-family: var(--mono); font-size: 13px; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--rule); padding: 10px 20px; cursor: pointer;
 }
-.act:hover:not(:disabled) { border-color: var(--navy); color: var(--navy); }
-.act.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
-.act.primary:hover:not(:disabled) { background: #0F2C4A; color: #fff; }
+.act:hover:not(:disabled) { border-color: var(--signal); color: var(--signal); }
+.act.primary { background: var(--signal); border-color: var(--signal); color: #fff; }
+.act.primary:hover:not(:disabled) { background: #0F3A59; }
 .act:disabled { opacity: .45; cursor: not-allowed; }
-.ctl .act { grid-column: 1 / -1; justify-self: start; }
 
-.status {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--rule-2);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--ink-2);
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; margin-top: 6px; }
-.dot.live { background: var(--good); }
+.status { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--ink-2); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.dot.live { background: var(--ok); }
 .dot.busy { background: var(--warn); }
-.dot.dead { background: var(--red); }
+.dot.dead { background: var(--alert); }
 
-/* the "what just happened" readout after a run */
-.whathappened {
-  display: none;
-  gap: 10px;
-  background: var(--sheet);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--good);
-  border-radius: 0 2px 2px 0;
-  padding: 18px 20px;
-  margin-top: 26px;
-  max-width: 78ch;
-}
-.whathappened span { font-size: 14px; line-height: 1.55; color: var(--ink-2); }
-.whathappened span b { color: var(--ink); font-weight: 600; }
+.whathappened { display: none; gap: 9px; margin-top: 22px; padding: 18px 20px; background: var(--sunk); border: 1px solid var(--rule); }
 .whathappened .h {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.whathappened span { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.whathappened b { color: var(--ink); font-weight: 600; }
+
+/* ---------------- figures ---------------- */
+
+.figs { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); grid-template-columns: 1fr; }
+@media (min-width: 640px) { .figs { grid-template-columns: repeat(3, 1fr); } }
+.fig { background: var(--panel); padding: 18px 18px; }
+.fig .v {
+  font-family: var(--mono); font-size: clamp(21px, 3vw, 26px); font-weight: 500;
+  letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+.fig .k { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); margin-top: 8px; }
+
+/* ---------------- the scale, and the two measures on it ---------------- */
+/* log10 nanoseconds, 1.5 -> 7.5. Ticks are positioned to the same values as
+   the axis labels; a repeating gradient sat 8.33% out of phase with them. */
+
+.scale { position: relative; }
+.scale .axis { position: relative; height: 16px; margin-top: 6px; }
+.scale .axis span {
+  position: absolute; transform: translateX(-50%); white-space: nowrap;
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-3);
+}
+@media (max-width: 560px) {
+  .scale .axis span:nth-child(2),
+  .scale .axis span:nth-child(4),
+  .scale .axis span:nth-child(5) { display: none; }
+  .scale .axis span:last-child { transform: translateX(-100%); }
 }
 
-/* ---------------- footer ---------------- */
+.meas { margin-top: 4px; }
+.corow { margin-bottom: 16px; }
+.corow .top { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+.corow .l { font-size: 13px; color: var(--ink-3); }
+.corow .l b { display: block; color: var(--ink); font-weight: 600; font-size: 13.5px; }
+.corow .n { font-family: var(--mono); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.corow .track { position: relative; display: block; height: 10px; background: var(--well); }
+.corow .track i { display: block; height: 100%; width: 0; transition: width .3s ease; }
+.corow .track .t { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.65); }
+.corow.service .track i { background: var(--ink-3); }
+.corow.service .n { color: var(--ink-3); }
+.corow.truth .track i { background: var(--alert); }
+.corow.truth .n { color: var(--alert); }
+.corow.truth .n.warnc { color: var(--alert); }
 
-footer {
-  border-top: 1px solid var(--rule);
-  padding: 34px 0 60px;
-  font-size: 12.5px;
-  color: var(--ink-3);
+/* ---------------- tables ---------------- */
+
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { padding: 11px 15px; text-align: left; border-bottom: 1px solid var(--hair); vertical-align: top; }
+thead th {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--rule); white-space: nowrap;
 }
-footer .row { display: flex; flex-wrap: wrap; gap: 10px 26px; justify-content: space-between; }
-footer .mono { font-family: var(--mono); font-size: 12px; }
+tbody tr:last-child td { border-bottom: 0; }
+.num { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.num { font-weight: 500; }
+/* This is the whole content of the correctness table, not a caption, so it
+   takes the body-text colour -- ink-3 sits at 3.05:1 on white. */
+.note { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.ok { color: var(--ok); }
+.badc { color: var(--alert); }
+.warnc { color: var(--warn); }
+.bar { display: inline-block; vertical-align: middle; width: 92px; height: 4px; background: var(--well); margin-right: 8px; }
+.bar i { display: block; height: 100%; background: var(--signal); }
 
-/* ---------- real-data year picker ---------- */
-.years { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+/* ---------------- year picker + verify output ---------------- */
+
+.years { display: flex; flex-wrap: wrap; gap: 6px; }
 .yr {
-  font-family: var(--mono); font-size:13px; font-weight:500;
-  padding:9px 15px; border-radius:6px; cursor:pointer;
-  border:1px solid var(--rule); background:var(--sheet); color:var(--ink);
-  font-variant-numeric: tabular-nums;
-  transition: background .15s ease, border-color .15s ease, color .15s ease;
+  font-family: var(--mono); font-size: 13.5px; color: var(--ink-2);
+  background: var(--panel); border: 1px solid var(--rule); padding: 9px 15px; cursor: pointer;
 }
-.yr:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
-.yr[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
-.yr:disabled { opacity:.45; cursor:default; }
-.vfy-grid { display:grid; gap:14px 26px; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); margin-bottom:20px; }
-.vfy-fig { border-top:1px solid var(--rule); padding-top:10px; }
-.vfy-fig .v { font-family:var(--mono); font-size:22px; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
-.vfy-fig .k { font-size:12px; color:var(--ink-2); margin-top:4px; line-height:1.4; }
-.vfy-fig.good .v { color:var(--ok); }
-.vfy-fig.bad  .v { color:var(--bad); }
+.yr:hover:not(:disabled) { border-color: var(--signal); color: var(--signal); }
+.yr[aria-pressed="true"] { background: var(--signal); border-color: var(--signal); color: #fff; }
+.yr:disabled { opacity: .5; cursor: wait; }
+
+.vfy-grid {
+  display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  grid-template-columns: repeat(2, 1fr); margin-bottom: 22px;
+}
+@media (min-width: 700px) { .vfy-grid { grid-template-columns: repeat(6, 1fr); } }
+.vfy-fig { background: var(--panel); padding: 15px 14px; }
+.vfy-fig .v { font-family: var(--mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.vfy-fig .k { font-size: 11.5px; color: var(--ink-3); margin-top: 5px; line-height: 1.35; }
+.vfy-fig.good .v { color: var(--ok); }
+.vfy-fig.bad  .v { color: var(--alert); }
+
+footer { border-top: 1px solid var(--rule); padding: 26px 0 40px; color: var(--ink-3); font-size: 12.5px; }
+footer a { color: var(--ink-2); }
+code { font-family: var(--mono); font-size: .92em; }
 </style>
 </head>
-
 <body>
-
 <div class="wrap">
 
-  <!-- ============================ HERO ============================ -->
-  <header class="hero">
-    <div class="rule-strip" aria-hidden="true"></div>
-
-    <p class="eyebrow">Market data pipeline · Rust · C++20 · Python</p>
-    <h1 class="title">NanoBook</h1>
-    <p class="thesis">Turning an exchange's raw network traffic into a correct picture of the market
-      in about 110 billionths of a second &mdash; and <b>proving both halves of that claim</b>.</p>
-
-    <div class="herolinks">
-      <a class="pill" href="https://github.com/pronton1234/NanoBook">Source on GitHub</a>
-      <a class="pill" href="https://github.com/pronton1234/NanoBook/actions/workflows/ci.yml"><span class="tick"></span>CI passing</a>
-      <a class="pill" href="#live">Try it live &darr;</a>
-    </div>
-
-    <div class="sheet">
-      <div class="fig">
-        <div class="v">110.4<span class="u">ns</span></div>
-        <div class="k">Packet in, order out</div>
-        <div class="n">per packet, on a pinned machine</div>
-      </div>
-      <div class="fig">
-        <div class="v">40,223,554</div>
-        <div class="k">Real exchange messages decoded</div>
-        <div class="n">zero errors, zero unknown types</div>
-      </div>
-      <div class="fig zero">
-        <div class="v">0</div>
-        <div class="k">Corrupted books</div>
-        <div class="n">across 38,993,905 updates</div>
-      </div>
-      <div class="fig">
-        <div class="v">8</div>
-        <div class="k">Measurement bugs caught before publishing</div>
-        <div class="n">none of them crashed</div>
-      </div>
-      <div class="fig">
-        <div class="v">3</div>
-        <div class="k">Languages &mdash; Rust, C++20, Python</div>
-        <div class="n">109 + 158 + 11 tests and checks</div>
-      </div>
-      <div class="fig">
-        <div class="v">1</div>
-        <div class="k">External dependency</div>
-        <div class="n">across six Rust crates</div>
-      </div>
-    </div>
+  <header class="top">
+    <div class="id">NanoBook<span>market data pipeline &middot; Rust</span></div>
+    <a href="https://github.com/pronton1234/NanoBook">Source on GitHub &rarr;</a>
   </header>
-
-  <!-- ============================ THE PROBLEM ============================ -->
-  <section class="section">
-    <p class="eyebrow">The problem, from the start</p>
-    <h2 class="wide">An exchange broadcasts every change to a list. You have to keep up.</h2>
-
-    <div class="prose stack" style="gap:16px">
-      <p class="lede">An exchange keeps a list of everyone who wants to buy and sell &mdash; at what
-        price, in what size. That list is the <strong>order book</strong>, and it changes thousands
-        of times a second.</p>
-      <p>If you want to trade, you need to know what that book looks like <strong>right now</strong>.
-        So the exchange broadcasts every change as a stream of network packets. Your job is:
-        packets arrive, rebuild the book, decide, send an order. That is the whole loop.</p>
-    </div>
-  </section>
-
-  <!-- ============================ WHY IT'S HARD ============================ -->
-  <section class="section">
-    <p class="eyebrow">Why it is harder than it sounds</p>
-    <h2 class="wide">Three things make this difficult, and none of them are about writing fast code.</h2>
-
-    <div class="reasons" style="margin-top:28px">
-      <div class="reason">
-        <span class="ix">01</span>
-        <h3>Everyone gets the same packets at the same time</h3>
-        <p>The exchange tells you nothing it is not telling everyone else, simultaneously. The only
-          edge available is <strong>who finishes processing first</strong>. If a competitor rebuilds
-          the book in 100 billionths of a second and you take 200, they are acting on information
-          you are still reading.</p>
-      </div>
-      <div class="reason">
-        <span class="ix">02</span>
-        <h3>The network lies to you</h3>
-        <p>These packets are sent by a protocol that makes no promises. Packets get lost, arrive out
-          of order, or arrive twice. Exchanges send everything <strong>twice down separate physical
-          paths</strong> precisely because they expect this. You have to notice a gap, take whichever
-          copy lands first, and discard the duplicate &mdash; in billionths of a second, never
-          dropping a message.</p>
-      </div>
-      <div class="reason">
-        <span class="ix">03</span>
-        <h3>Nothing tells you when you are wrong</h3>
-        <p>There is no correct answer to check against. <strong>If your book is wrong, it still looks
-          like a book.</strong> You just start trading against a market that does not exist.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================ WHAT THIS IS ============================ -->
-  <section class="section">
-    <p class="eyebrow">What this is</p>
-    <h2 class="wide">The machine that turns packets into a correct book, quickly.</h2>
-    <p class="prose lede" style="margin-bottom:26px">About <strong>110 nanoseconds</strong> from a
-      packet arriving to an order being encoded. Run against <strong>40 million real messages</strong>
-      from a real exchange: zero decode errors, zero corrupted books.</p>
-  </section>
-
-  <!-- ============================ WHY IT'S IMPRESSIVE — 1 ============================ -->
-  <section class="section">
-    <p class="eyebrow">The measurement error at the centre of this</p>
-    <h2 class="wide">How a speed test hides its own stalls</h2>
-
-    <p class="prose lede">Most speed tests measure how long a task took <strong>once it started</strong>.
-      If the system stalls, everything stuck waiting behind the stall never gets measured &mdash; so
-      the stall vanishes from the results. Measure instead from when each message
-      <strong>should</strong> have been handled, and it reappears.</p>
-
-    <p class="prose" style="margin-bottom:26px">Below, the same pipeline at three speeds. The
-      flattering measure never moves. The honest one goes from a rounding error to fifteen
-      milliseconds behind the market.</p>
-
-    <div class="panel co">
-      <div>
-        <p class="subhead">Messages arriving, as a share of what the system can handle</p>
-        <div class="segmented" role="group" aria-label="Offered load">
-          <button type="button" data-co="0" aria-pressed="true">50%</button>
-          <button type="button" data-co="1" aria-pressed="false">90%</button>
-          <button type="button" data-co="2" aria-pressed="false">110%</button>
-        </div>
-      </div>
-
-      <div class="corows">
-        <div class="corow service">
-          <div class="top">
-            <span class="lab"><b>The flattering measure</b>timed once work began</span>
-            <span class="num" id="coService">90 ns</span>
-          </div>
-          <span class="track"><i id="coServiceBar" style="width:7.5%"></i></span>
-        </div>
-        <div class="corow truth">
-          <div class="top">
-            <span class="lab"><b>The honest measure</b>timed from when the message should have been handled</span>
-            <span class="num" id="coTruth">125 ns</span>
-          </div>
-          <span class="track"><i id="coTruthBar" style="width:10%"></i></span>
-        </div>
-        <div class="axis" aria-hidden="true">
-          <span style="left:8.33%">100 ns</span>
-          <span style="left:25%">1 &micro;s</span>
-          <span style="left:41.67%">10 &micro;s</span>
-          <span style="left:75%">1 ms</span>
-          <span style="left:91.67%">10 ms</span>
-        </div>
-      </div>
-
-      <div class="coverdict">
-        <span class="x" id="coRatio">1.4&times;</span>
-        <span class="t" id="coText">Below capacity the queue drains between items, so the two agree.
-          A benchmark run only here would look correct.</span>
-      </div>
-    </div>
-
-    <p class="prose small" style="margin-top:16px">The bars use a logarithmic scale &mdash; each step
-      along the axis is ten times longer than the last. On a normal scale 90 ns and 5.42 &micro;s
-      would render as the same invisible sliver, which is the exact flattening the bug performs.</p>
-
-    <p class="prose" style="margin-top:20px">The flattering number is not lying about the work it
-      timed. It is answering a different question from the one anybody cares about. A system
-      reporting 90 ns at 110% of capacity is, in reality, fifteen milliseconds behind the market.</p>
-  </section>
 
   <!-- ============================ LIVE ============================ -->
   <section class="section" id="live">
-    <p class="eyebrow">Try it yourself</p>
-    <h2 class="wide">Break the network on purpose, and watch it cope</h2>
+    <h2 class="lab">Try it</h2>
 
-    <div class="banner" id="hostNote">
-      Every number below is measured <b>live, on this server</b>, by the same code the repository
-      benchmarks &mdash; nothing is faked in the browser. The server is shared cloud hardware, so its
-      numbers wobble more than the headline figures above, which come from a dedicated machine.
-    </div>
-
-    <div class="panel" style="margin-top:24px">
+    <div class="panel">
       <div class="ctl">
         <div>
           <label for="gap">Packet loss &mdash; <span class="val" id="gapV">0%</span></label>
-          <span class="hint">Throw away some packets, the way a real network does.
-            <em>Watch it detect the gaps and recover.</em></span>
+          <span class="hint">Throw packets away. Watch it detect the gaps and recover.</span>
           <input type="range" id="gap" min="0" max="10" step="1" value="0">
+          <div class="ends" aria-hidden="true"><span>0%</span><span>10%</span></div>
         </div>
-
         <div>
-          <label for="load">Offered load &mdash; <span class="val" id="loadV">90%</span> of capacity</label>
-          <span class="hint">How fast messages arrive, as a share of what the system can handle.
-            <em>Push past 100% and watch the honest measure explode while the flattering one stays
-            flat.</em></span>
+          <label for="load">Offered load &mdash; <span class="val" id="loadV">90%</span></label>
+          <span class="hint">Push past 100% and the honest measure explodes while the flattering one holds still.</span>
           <input type="range" id="load" min="10" max="200" step="10" value="90">
+          <div class="ends" aria-hidden="true"><span>10%</span><span class="mid">100% capacity</span><span>200%</span></div>
         </div>
-
         <div>
           <label for="dup">Duplicate feed</label>
-          <span class="hint">Send every message twice, as exchanges really do.
-            <em>Watch it use the first copy and discard the second.</em></span>
+          <span class="hint">Send everything twice, as exchanges do.</span>
           <select id="dup">
-            <option value="0">Off &mdash; one copy of each message</option>
-            <option value="1">On &mdash; every message sent twice</option>
+            <option value="0">Off</option>
+            <option value="1">On &mdash; every message twice</option>
           </select>
         </div>
-
         <div>
-          <label for="container">Storage for price levels</label>
-          <span class="hint">Which internal data structure holds the prices.
-            <em>The shipped one against the simple reference it is checked against.</em></span>
+          <label for="container">Price-level storage</label>
+          <span class="hint">The shipped design, or the reference it is checked against.</span>
           <select id="container">
-            <option value="sorted">Sorted arrays &mdash; the shipped design</option>
-            <option value="btree">BTreeMap &mdash; the simple reference</option>
+            <option value="sorted">Sorted arrays &mdash; shipped</option>
+            <option value="btree">BTreeMap &mdash; reference</option>
           </select>
         </div>
-
-        <button class="act primary" id="go" type="button">Run it</button>
       </div>
-      <div class="status"><span class="dot" id="dot"></span><span id="msg">Checking the server&hellip;</span></div>
+
+      <div class="bar-actions">
+        <button class="act primary" id="go" type="button">Run it</button>
+        <div class="status"><span class="dot" id="dot"></span><span id="msg">Checking the server&hellip;</span></div>
+      </div>
     </div>
 
     <div class="whathappened" id="runWhat"><span class="h">What just happened</span></div>
 
     <div id="results" style="display:none">
-      <div class="stack" style="margin-top:28px">
+      <div class="stack" style="margin-top:26px">
 
         <div>
-          <p class="subhead">Speed</p>
-          <div class="sheet">
-            <div class="fig">
-              <div class="v" id="nsPacket">&mdash;</div>
-              <div class="k">Packet in, order out</div>
-              <div class="n" id="spreadNote">per packet</div>
+          <p class="sub">Speed</p>
+          <div class="figs">
+            <div class="fig"><div class="v" id="nsPacket">&mdash;</div><div class="k">Packet in, order out &mdash; <span id="spreadNote">per packet</span></div></div>
+            <div class="fig"><div class="v" id="messages">&mdash;</div><div class="k">Messages decoded <span id="pktNote"></span></div></div>
+            <div class="fig"><div class="v" id="orders">&mdash;</div><div class="k">Orders written</div></div>
+          </div>
+        </div>
+
+        <div>
+          <p class="sub">Two ways to time the same run</p>
+          <div class="panel">
+            <div class="meas">
+              <div class="corow service">
+                <div class="top"><span class="l"><b>Flattering</b>timed once work began</span><span class="n" id="sp50">&mdash;</span></div>
+                <span class="track"><i id="sp50Bar"></i></span>
+              </div>
+              <div class="corow truth">
+                <div class="top"><span class="l"><b>Honest</b>timed from when it should have run</span><span class="n" id="cp50">&mdash;</span></div>
+                <span class="track"><i id="cp50Bar"></i></span>
+              </div>
+              <div class="scale">
+                <div class="axis" aria-hidden="true">
+                  <span style="left:8.33%">100 ns</span>
+                  <span style="left:25%">1 &micro;s</span>
+                  <span style="left:41.67%">10 &micro;s</span>
+                  <span style="left:58.33%">100 &micro;s</span>
+                  <span style="left:75%">1 ms</span>
+                  <span style="left:91.67%">10 ms</span>
+                </div>
+              </div>
             </div>
-            <div class="fig">
-              <div class="v" id="messages">&mdash;</div>
-              <div class="k">Messages decoded</div>
-              <div class="n" id="pktNote">&nbsp;</div>
-            </div>
-            <div class="fig">
-              <div class="v" id="orders">&mdash;</div>
-              <div class="k">Orders written</div>
-              <div class="n">from a placeholder strategy</div>
+            <div class="scroll" style="margin-top:20px">
+              <table>
+                <thead><tr><th></th><th class="num">Worst 1%</th></tr></thead>
+                <tbody>
+                  <tr><td>Flattering &mdash; timed once work began</td><td class="num" id="sp99">&mdash;</td></tr>
+                  <tr><td>Honest &mdash; timed from when it should have run</td><td class="num" id="cp99">&mdash;</td></tr>
+                  <tr><td>Packets running late</td><td class="num" id="behind">&mdash;</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
 
         <div>
-          <p class="subhead">What the network did, and what it caught</p>
+          <p class="sub">What the network did</p>
           <div class="panel tight scroll">
             <table>
               <thead><tr><th>Measure</th><th class="num">Count</th><th>What it means</th></tr></thead>
               <tbody>
-                <tr><td>Duplicate copies discarded</td><td class="num" id="dups">&mdash;</td>
-                    <td class="note">The second copy of a message that already arrived. Kept out of the book.</td></tr>
-                <tr><td>Gaps detected</td><td class="num" id="gaps">&mdash;</td>
-                    <td class="note">Holes in the stream, noticed and recovered from. Packets lost back to back count as one gap, so this sits below the number thrown away.</td></tr>
-                <tr><td>Packets thrown away</td><td class="num" id="gapsInj">&mdash;</td>
-                    <td class="note">What the loss slider destroyed, shown for comparison.</td></tr>
-                <tr><td>Corrupted books</td><td class="num" id="crossed">&mdash;</td>
-                    <td class="note">Must be zero. A book offering to sell below the best buy price is impossible, so any count above zero is a bug.</td></tr>
+                <tr><td>Duplicates discarded</td><td class="num" id="dups">&mdash;</td><td class="note">Second copy of a message already seen. Kept out of the book.</td></tr>
+                <tr><td>Gaps detected</td><td class="num" id="gaps">&mdash;</td><td class="note">Holes noticed and recovered from. Back-to-back losses count as one gap, so this sits below the number thrown away.</td></tr>
+                <tr><td>Packets thrown away</td><td class="num" id="gapsInj">&mdash;</td><td class="note">What the loss slider destroyed.</td></tr>
+                <tr><td>Corrupted books</td><td class="num" id="crossed">&mdash;</td><td class="note">Must be zero. Selling below the best bid is impossible, so anything above zero is a bug.</td></tr>
               </tbody>
             </table>
           </div>
         </div>
 
         <div>
-          <p class="subhead">The two measures, on this server</p>
+          <p class="sub">The rebuilt book</p>
           <div class="panel tight scroll">
             <table>
-              <thead><tr><th></th><th class="num">Typical</th><th class="num">Worst 1%</th></tr></thead>
-              <tbody>
-                <tr><td>The flattering measure &mdash; timed once work began</td><td class="num" id="sp50">&mdash;</td><td class="num" id="sp99">&mdash;</td></tr>
-                <tr><td>The honest measure &mdash; timed from when it should have been handled</td><td class="num" id="cp50">&mdash;</td><td class="num" id="cp99">&mdash;</td></tr>
-                <tr><td>Packets running late</td><td class="num" id="behind">&mdash;</td><td></td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div>
-          <p class="subhead">The rebuilt book &mdash; best prices right now</p>
-          <div class="panel tight scroll">
-            <table>
-              <thead><tr><th>Symbol</th><th class="num">Buy</th><th class="num">Size</th><th class="num">Sell</th>
-                  <th class="num">Size</th><th class="num">Buy levels</th><th class="num">Sell levels</th></tr></thead>
+              <thead><tr><th>Symbol</th><th class="num">Buy</th><th class="num">Size</th><th class="num">Sell</th><th class="num">Size</th><th class="num">Buy levels</th><th class="num">Sell levels</th></tr></thead>
               <tbody id="book"></tbody>
             </table>
           </div>
@@ -937,176 +373,19 @@ footer .mono { font-family: var(--mono); font-size: 12px; }
     </div>
   </section>
 
-  <!-- ============================ ENGINEER DETAIL ============================ -->
+  <!-- ============================ REAL DATA ============================ -->
   <section class="section" id="realdata">
-    <div class="wrap">
-      <p class="eyebrow">Check it yourself</p>
-      <h2 class="wide">Pick a year. Watch it decode a real trading day.</h2>
-      <p class="lede" style="max-width:62ch">
-        Everything above runs on data this project generates. Fair enough &mdash; but
-        &ldquo;it reads its own output correctly&rdquo; is a weak claim. So ten real sessions
-        are built into the server, one per year, each the opening minutes of that
-        day&rsquo;s feed as IEX actually published it. Choose one and the decoder runs
-        against those bytes right now.
-      </p>
+    <h2 class="lab">Check it against reality</h2>
 
-      <div class="years" role="group" aria-label="Choose a trading day"><button class="yr" type="button" data-day="2017-11-16" aria-pressed="false">2017</button><button class="yr" type="button" data-day="2018-10-09" aria-pressed="false">2018</button><button class="yr" type="button" data-day="2019-02-27" aria-pressed="false">2019</button><button class="yr" type="button" data-day="2020-07-30" aria-pressed="false">2020</button><button class="yr" type="button" data-day="2021-06-28" aria-pressed="false">2021</button><button class="yr" type="button" data-day="2022-06-02" aria-pressed="false">2022</button><button class="yr" type="button" data-day="2023-01-03" aria-pressed="false">2023</button><button class="yr" type="button" data-day="2024-07-09" aria-pressed="false">2024</button><button class="yr" type="button" data-day="2025-09-10" aria-pressed="false">2025</button><button class="yr" type="button" data-day="2026-05-22" aria-pressed="false">2026</button></div>
-      <div class="small" id="vfyNote" style="margin-top:12px; color:var(--ink-2)">Choose a year above.</div>
-      <div id="vfyOut" style="margin-top:20px"></div>
-
-
-      <p class="small" style="margin-top:20px; color:var(--ink-3)">
-        Market data provided for free by <a href="https://iextrading.com">IEX</a>. By accessing
-        or using IEX Historical Data you agree to the IEX Historical Data Terms of Use.
-      </p>
-    </div>
-  </section>
-
-  <section class="section">
-    <p class="eyebrow">For engineers &mdash; the detail</p>
-    <h2 class="wide">Six stages between a packet and an order</h2>
-
-    <p class="prose">Costs measured by cumulative prefix on a pinned machine: each stage's cost is
-      the difference between running the pipeline up to it and up to the one before. Where that
-      difference is smaller than the run-to-run spread, no cost is claimed for it.</p>
-
-    <div class="ladder" style="margin-top:24px">
-      <div class="rung r1">
-        <span class="ix">01</span>
-        <span class="nm">receive</span>
-        <span class="ds">Strip Ethernet, 802.1Q VLAN, IPv4 and UDP headers. Zero copy.</span>
-        <span class="cost">10.2<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:12.8%"></i></span>
-      </div>
-      <div class="rung r2">
-        <span class="ix">02</span>
-        <span class="nm">sequence</span>
-        <span class="ds">Transport segments, gap detection, retransmit requests, A/B feed arbitration.</span>
-        <span class="cost">8.8<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:11.1%"></i></span>
-      </div>
-      <div class="rung r3">
-        <span class="ix">03</span>
-        <span class="nm">parse</span>
-        <span class="ds">Binary decode. Fixed width, fixed point, no allocation.</span>
-        <span class="cost">26.7<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:33.6%"></i></span>
-      </div>
-      <div class="rung r4">
-        <span class="ix">04</span>
-        <span class="nm">book</span>
-        <span class="ds">Aggregated-depth order book, sorted structure of arrays. The dominant stage.</span>
-        <span class="cost">79.4<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:100%"></i></span>
-      </div>
-      <div class="rung r5">
-        <span class="ix">05</span>
-        <span class="nm">decide</span>
-        <span class="ds">Strategy hook. Deliberately trivial &mdash; a placeholder holding a slot in the budget.</span>
-        <span class="cost">5.2<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:6.5%"></i></span>
-      </div>
-      <div class="rung r6">
-        <span class="ix">06</span>
-        <span class="nm">encode</span>
-        <span class="ds">Order message written straight into the outbound wire buffer.</span>
-        <span class="cost">13.0<span class="u"> ns</span></span>
-        <span class="bar"><i style="--w:16.4%"></i></span>
-      </div>
-    </div>
-
-    <div style="margin-top:34px">
-      <p class="subhead">Re-measure the stage budget on this server</p>
-      <div class="panel">
-        <p class="prose small" style="margin:0 0 16px; max-width:72ch">Nine timed passes. Where a
-          stage's cost is smaller than the run-to-run spread, the row is flagged
-          <span class="flag">unresolved</span> &mdash; the measurement cannot tell the two apart, so
-          it does not claim to.</p>
-        <button class="act" id="budgetGo" type="button">Measure the stage budget</button>
-        <div class="small" id="budgetNote" style="margin-top:14px; color:var(--ink-2)">Takes a few seconds &mdash; nine passes, run one at a time.</div>
-        <div class="scroll" id="budgetOut" style="margin-top:16px"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================ DESIGN DECISIONS ============================ -->
-  <section class="section">
-    <p class="eyebrow">Where the design came from</p>
-    <h2 class="wide">The data chose the data structure</h2>
-
-    <div class="cols" style="margin-bottom:28px">
-      <div class="panel">
-        <div class="fig" style="padding:0">
-          <div class="v">97<span class="u">%</span></div>
-          <div class="k">of feed traffic is price-level updates</div>
-        </div>
-        <p class="prose small" style="margin:14px 0 0">Measured over a full trading day: 48.80% sell
-          updates, 48.14% buy, 2.94% trade reports, 0.12% everything else. The book's add / update /
-          delete path <strong>is</strong> the cost of the system, which makes the container choice
-          the whole engineering problem rather than a detail.</p>
-      </div>
-      <div class="panel">
-        <div class="fig" style="padding:0">
-          <div class="v">2<span class="u">levels</span></div>
-          <div class="k">median book depth, over a 480-tick span</div>
-        </div>
-        <p class="prose small" style="margin:14px 0 0">This killed the textbook flat-array design. An
-          array indexed by price tick pays for 480 slots to hold a median of two occupied levels
-          &mdash; it spends the entire cache budget on emptiness. Measuring the depth first is what
-          stopped that from being built.</p>
-      </div>
-    </div>
-
-    <p class="subhead">Container bake-off &mdash; cost per book update</p>
-    <div class="panel tight scroll">
-      <table>
-        <thead><tr><th>Container</th><th class="num">ns / update</th><th class="num">vs baseline</th><th>Verdict</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>sorted structure-of-arrays<span class="minibar win"><i style="width:47.7%"></i></span></td>
-            <td class="num ok">49.6</td><td class="num ok">1.20&times;</td>
-            <td class="note">Shipped. Contiguous, branch-predictable, and shallow books make the linear scan free.</td>
-          </tr>
-          <tr>
-            <td>inline levels<span class="minibar lose"><i style="width:50.0%"></i></span></td>
-            <td class="num">51.9</td><td class="num">1.15&times;</td>
-            <td class="note">Lost. Close enough to be tempting, not close enough to justify the fixed capacity.</td>
-          </tr>
-          <tr>
-            <td>BTreeMap<span class="minibar lose"><i style="width:57.4%"></i></span></td>
-            <td class="num">59.6</td><td class="num">baseline</td>
-            <td class="note">The correct reference the fast path is differentially tested against.</td>
-          </tr>
-          <tr>
-            <td>arena<span class="minibar lose"><i style="width:100%"></i></span></td>
-            <td class="num badc">103.9</td><td class="num badc">0.57&times;</td>
-            <td class="note">Lost badly. Pointer chasing costs more than the allocation it avoids.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="cols" style="margin-top:16px">
-      <div class="panel">
-        <h3>C++20 against Rust: it was the data structure, not the language</h3>
-        <p class="prose small" style="margin:0">The C++ port started 233 ns behind and looked like a
-          language gap. Replacing <code style="font-family:var(--mono)">std::unordered_map</code>
-          with an open-addressed map took it to 146 ns, landing within noise of the Rust build. The
-          difference was never the compiler.</p>
-      </div>
-      <div class="panel">
-        <h3>A pricing model that checks itself</h3>
-        <p class="prose small" style="margin:0">Monte Carlo option pricing, validated by requiring
-          its 95% confidence interval to contain the analytic Black&ndash;Scholes price &mdash; a
-          test that fails when the simulation is subtly wrong, not merely when it crashes.</p>
-      </div>
-    </div>
+    <div class="years" role="group" aria-label="Choose a trading day"><button class="yr" type="button" data-day="2017-11-16" aria-pressed="false">2017</button><button class="yr" type="button" data-day="2018-10-09" aria-pressed="false">2018</button><button class="yr" type="button" data-day="2019-02-27" aria-pressed="false">2019</button><button class="yr" type="button" data-day="2020-07-30" aria-pressed="false">2020</button><button class="yr" type="button" data-day="2021-06-28" aria-pressed="false">2021</button><button class="yr" type="button" data-day="2022-06-02" aria-pressed="false">2022</button><button class="yr" type="button" data-day="2023-01-03" aria-pressed="false">2023</button><button class="yr" type="button" data-day="2024-07-09" aria-pressed="false">2024</button><button class="yr" type="button" data-day="2025-09-10" aria-pressed="false">2025</button><button class="yr" type="button" data-day="2026-05-22" aria-pressed="false">2026</button></div>
+    <div class="small" id="vfyNote" style="margin-top:14px; color:var(--ink-2)">Choose a year.</div>
+    <div id="vfyOut" style="margin-top:20px"></div>
   </section>
 
   <!-- ============================ CORRECTNESS ============================ -->
   <section class="section">
-    <p class="eyebrow">Correctness</p>
-    <h2 class="wide">What is actually verified</h2>
+    <p class="lab">Correctness</p>
+    <h2>What is actually verified.</h2>
     <div class="panel tight scroll">
       <table>
         <tbody>
@@ -1114,25 +393,18 @@ footer .mono { font-family: var(--mono); font-size: 12px; }
           <tr><td class="num">0</td><td class="note">Corrupted books across 38,993,905 updates. The exchange splits one logical book change across several messages, so the book is legitimately inconsistent in between; the check is gated on the feed's event-complete flag, which keeps it strict exactly where it means something.</td></tr>
           <tr><td class="num">2</td><td class="note">Independent implementations &mdash; a throwaway Python decoder written first, then the Rust &mdash; agreeing exactly on every per-type message count.</td></tr>
           <tr><td class="num">109 + 158 + 11</td><td class="note">Rust tests, C++ checks and Python tests, plus the lock-free queue model-checked across every ordering the memory model permits. Development is on ARM64, whose weak memory model breaks lock-free code that x86 would have hidden.</td></tr>
-          <tr><td class="num">1</td><td class="note">External dependency (<code style="font-family:var(--mono)">thiserror</code>) across six Rust crates.</td></tr>
+          <tr><td class="num">1</td><td class="note">External dependency (<code>thiserror</code>) across six Rust crates.</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
   <footer>
-    <div class="row">
-      <span class="mono">NanoBook &mdash; market data pipeline in Rust, C++20 and Python</span>
-      <span class="mono"><a href="https://github.com/pronton1234/NanoBook">github.com/pronton1234/NanoBook</a></span>
-    </div>
-    <p style="margin:16px 0 0; max-width:72ch; line-height:1.5">Market data provided for free by IEX.
-      Captures are fetched, never committed. Headline latency figures are measured on a pinned
-      machine; figures produced by the live instrument come from shared cloud hardware and carry a
-      correspondingly wider spread.</p>
+    <p style="margin:0 0 10px; max-width:74ch">Figures from &ldquo;Try it&rdquo; are measured live on shared cloud hardware and wobble more than a pinned machine; the counts above come from a full trading day on a pinned one.</p>
+    <p style="margin:0; max-width:74ch">Market data provided for free by <a href="https://iextrading.com">IEX</a>. By accessing or using IEX Historical Data you agree to the IEX Historical Data Terms of Use. Captures are fetched, never committed.</p>
   </footer>
 
 </div>
-
 <script>
 // The backend is a separate host from GitHub Pages, so it is configured rather
 // than assumed. When it is absent the page still renders every static result.
@@ -1147,6 +419,14 @@ function fmtNs(ns) {
   if (ns >= 1e6) return (ns / 1e6).toFixed(2) + " ms";
   if (ns >= 1e3) return (ns / 1e3).toFixed(2) + " µs";
   return Math.round(ns) + " ns";
+}
+
+// Position on the log scale the page is built around: 10^1.5 ns to 10^7.5 ns,
+// i.e. ~32 ns to ~32 ms. The axis labels are placed at the same values.
+function nsWidth(ns) {
+  const lo = 1.5, hi = 7.5;
+  const t = (Math.log10(Math.max(ns, 10)) - lo) / (hi - lo);
+  return (Math.min(Math.max(t, 0.015), 1) * 100).toFixed(1) + "%";
 }
 
 function setStatus(cls, text) {
@@ -1171,7 +451,6 @@ async function waitForWarm() {
       if (h.warm) {
         warm = true;
         $("go").disabled = false;
-        $("budgetGo").disabled = false;
         setStatus("live", `Ready — ${h.arch}, warmed in ${h.warmup_ms} ms, ${h.runs_served} runs served`);
         return;
       }
@@ -1232,8 +511,14 @@ function render(d) {
   $("cp50").textContent = fmtNs(d.corrected_p50);
   $("cp99").textContent = fmtNs(d.corrected_p99);
   const ratio = d.service_p50 > 0 ? d.corrected_p50 / d.service_p50 : 0;
-  $("cp50").className = "num " + (ratio > 10 ? "warnc" : "");
+  $("cp50").classList.toggle("warnc", ratio > 10);
   $("behind").textContent = fmtInt(d.behind_schedule);
+
+  // Plot both on the shared log scale. Linear would render 125 ns and 2.7 ms
+  // as the same invisible sliver -- which is the exact flattening the
+  // coordinated-omission bug performs, so it has to be logarithmic here.
+  $("sp50Bar").style.width = nsWidth(d.service_p50);
+  $("cp50Bar").style.width = nsWidth(d.corrected_p50);
 
   $("book").innerHTML = d.top.map((t) => `
     <tr><td>${t.symbol}</td>
@@ -1268,112 +553,10 @@ function render(d) {
   }
 }
 
-// ---------------------------------------------------------------------
-// Stage budget: /budget runs nine timed passes and reports each stage as
-// the difference between two cumulative prefixes. Where that difference is
-// smaller than the spread, the server marks it unresolved and the row is
-// flagged rather than quietly presented as a result.
-// ---------------------------------------------------------------------
-async function budget() {
-  if (!warm) return;
-  $("budgetGo").disabled = true;
-  $("budgetNote").textContent = "Measuring — nine timed passes, run one at a time.";
-  try {
-    const r = await fetch(API + "/budget", { cache: "no-store" });
-    if (r.status === 503) {
-      $("budgetNote").textContent = "Still warming — a measurement taken now would report the server waking up.";
-      $("budgetGo").disabled = false;
-      return;
-    }
-    renderBudget(await r.json());
-  } catch (e) {
-    $("budgetNote").textContent = "Budget request failed: " + e.message;
-  }
-  $("budgetGo").disabled = false;
-}
-
-function renderBudget(d) {
-  const stages = d.stages || [];
-  const max = stages.reduce((m, s) => Math.max(m, s.this_stage), 0) || 1;
-
-  const rows = stages.map((s, i) => {
-    const w = Math.max(0, (s.this_stage / max) * 100).toFixed(1);
-    const cls = s.unresolved ? "lose" : (i === 0 ? "win" : "");
-    const flag = s.unresolved ? '<span class="flag">unresolved</span>' : "";
-    return `
-      <tr class="${s.unresolved ? "unres" : ""}">
-        <td>${s.name}<span class="minibar ${cls}"><i style="width:${w}%"></i></span></td>
-        <td class="num ${s.unresolved ? "warnc" : ""}">${s.this_stage.toFixed(1)}</td>
-        <td class="num">&plusmn;${s.spread.toFixed(1)}</td>
-        <td class="num">${s.cumulative.toFixed(1)}</td>
-        <td>${flag}</td>
-      </tr>`;
-  }).join("");
-
-  $("budgetOut").innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Stage</th><th class="num">This stage (ns)</th><th class="num">Spread</th>
-        <th class="num">Cumulative (ns)</th><th></th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-
-  const u = d.unresolved;
-  $("budgetNote").innerHTML = u > 0
-    ? `<b style="color:var(--warn)">${u} of ${d.of} stage costs unresolved</b> on ${d.arch} — the difference between those prefixes is inside the run-to-run spread, so no cost is claimed for them.`
-    : `All ${d.of} stage costs resolved on ${d.arch} — each is larger than its own run-to-run spread.`;
-}
-
-// ---------------------------------------------------------------------
-// Static coordinated-omission demo. Runs without the backend so the page
-// works on GitHub Pages cold. Bars are log-scaled: linear scaling would
-// render the 50% and 90% cases as an identical sliver of nothing, which is
-// the same flattening the bug itself performs.
-// ---------------------------------------------------------------------
-const CO = [
-  { label: "50%",  service: 90, truth: 125,
-    ratio: "1.4×",
-    text: "Below capacity the queue drains between messages, so the two agree. A speed test run only here would look completely correct." },
-  { label: "90%",  service: 90, truth: 5420,
-    ratio: "60×",
-    text: "Messages have started queueing, and the flattering measure has not moved by a nanosecond. It is already sixty times optimistic." },
-  { label: "110%", service: 90, truth: 14970000,
-    ratio: "166,000×",
-    text: "Past capacity the queue never drains. The flattering measure still reports 90 ns while the system runs fifteen milliseconds behind the market." },
-];
-
-// log10 scale from 100 ns (1.5) to ~30 ms (7.5)
-function coWidth(ns) {
-  const lo = 1.5, hi = 7.5;
-  const t = (Math.log10(Math.max(ns, 10)) - lo) / (hi - lo);
-  return (Math.min(Math.max(t, 0.02), 1) * 100).toFixed(1) + "%";
-}
-
-function setCo(i) {
-  const c = CO[i];
-  $("coService").textContent = fmtNs(c.service);
-  $("coTruth").textContent = fmtNs(c.truth);
-  $("coServiceBar").style.width = coWidth(c.service);
-  $("coTruthBar").style.width = coWidth(c.truth);
-  $("coRatio").textContent = c.ratio;
-  $("coText").textContent = c.text;
-  document.querySelectorAll("[data-co]").forEach((b) => {
-    b.setAttribute("aria-pressed", String(Number(b.dataset.co) === i));
-  });
-}
-
-document.querySelectorAll("[data-co]").forEach((b) => {
-  b.onclick = () => setCo(Number(b.dataset.co));
-});
-setCo(0);
-
 $("load").oninput = (e) => ($("loadV").textContent = e.target.value + "%");
 $("gap").oninput = (e) => ($("gapV").textContent = e.target.value + "%");
 $("go").onclick = run;
-$("budgetGo").onclick = budget;
 $("go").disabled = true;
-$("budgetGo").disabled = true;
 waitForWarm();
 
 /* ---------- real exchange data: pick a year, decode it ---------- */
