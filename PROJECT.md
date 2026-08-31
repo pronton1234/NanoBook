@@ -1,7 +1,7 @@
 # NanoBook
 
-**Live demo:** https://pronton1234.github.io/NanoBook/
-**Source:** https://github.com/pronton1234/NanoBook
+**Live demo:** https://pranitmathur06.github.io/NanoBook/
+**Source:** https://github.com/pranitmathur06/NanoBook
 
 This document has two halves. **Part One** explains what this is to anyone,
 assuming no knowledge of markets or networking. **Part Two** is the technical
